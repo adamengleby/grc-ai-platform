@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Login Page</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .debug-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .test-button:hover {
+            background: #0056b3;
+        }
+        .results {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 20px;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+        .error {
+            color: red;
+        }
+        .success {
+            color: green;
+        }
+    </style>
+</head>
+<body>
+    <div class="debug-container">
+        <h1>GRC Dashboard Login Debug Tool</h1>
+        <p>This tool helps debug why the login page isn't showing up.</p>
+        
+        <div>
+            <button class="test-button" onclick="testMainPage()">Test Main Page (localhost:3001)</button>
+            <button class="test-button" onclick="testLoginPage()">Test Login Page (localhost:3001/login)</button>
+            <button class="test-button" onclick="testDashboard()">Test Dashboard (localhost:3001/dashboard)</button>
+            <button class="test-button" onclick="checkLocalStorage()">Check Local Storage</button>
+            <button class="test-button" onclick="clearAuth()">Clear Auth Data</button>
+        </div>
+        
+        <div id="results" class="results">
+Click a button above to start testing...
+        </div>
+    </div>
+
+    <script>
+        function log(message, type = 'info') {
+            const results = document.getElementById('results');
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type === 'error' ? 'error' : type === 'success' ? 'success' : '';
+            results.innerHTML += `[${timestamp}] ${message}\n`;
+            if (className) {
+                results.innerHTML = results.innerHTML.replace(message, `<span class="${className}">${message}</span>`);
+            }
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+
+        async function testMainPage() {
+            clearResults();
+            log('Testing main page...');
+            try {
+                const response = await fetch('http://localhost:3001/');
+                log(`Main page status: ${response.status}`, response.ok ? 'success' : 'error');
+                
+                if (response.ok) {
+                    const html = await response.text();
+                    log(`Page title found: ${html.includes('<title>') ? 'Yes' : 'No'}`);
+                    log(`Root div found: ${html.includes('<div id="root">') ? 'Yes' : 'No'}`);
+                    log(`React script found: ${html.includes('main.tsx') ? 'Yes' : 'No'}`);
+                }
+            } catch (error) {
+                log(`Error testing main page: ${error.message}`, 'error');
+            }
+        }
+
+        async function testLoginPage() {
+            clearResults();
+            log('Testing login page...');
+            try {
+                const response = await fetch('http://localhost:3001/login');
+                log(`Login page status: ${response.status}`, response.ok ? 'success' : 'error');
+                
+                if (response.ok) {
+                    const html = await response.text();
+                    log(`Same HTML as main page: ${html.includes('<div id="root">') ? 'Yes (SPA routing)' : 'No'}`);
+                }
+            } catch (error) {
+                log(`Error testing login page: ${error.message}`, 'error');
+            }
+        }
+
+        async function testDashboard() {
+            clearResults();
+            log('Testing dashboard page...');
+            try {
+                const response = await fetch('http://localhost:3001/dashboard');
+                log(`Dashboard page status: ${response.status}`, response.ok ? 'success' : 'error');
+                
+                if (response.ok) {
+                    const html = await response.text();
+                    log(`Same HTML as main page: ${html.includes('<div id="root">') ? 'Yes (SPA routing)' : 'No'}`);
+                }
+            } catch (error) {
+                log(`Error testing dashboard page: ${error.message}`, 'error');
+            }
+        }
+
+        function checkLocalStorage() {
+            clearResults();
+            log('Checking local storage...');
+            
+            const authToken = localStorage.getItem('auth_token');
+            const currentUser = localStorage.getItem('current_user');
+            const currentTenant = localStorage.getItem('current_tenant');
+            const theme = localStorage.getItem('theme');
+            
+            log(`Auth token: ${authToken ? 'Present' : 'Not found'}`);
+            if (authToken) {
+                try {
+                    const parsed = JSON.parse(authToken);
+                    const now = Math.floor(Date.now() / 1000);
+                    log(`Token expired: ${parsed.exp < now ? 'Yes' : 'No'}`);
+                } catch (e) {
+                    log('Token parsing error', 'error');
+                }
+            }
+            
+            log(`Current user: ${currentUser ? 'Present' : 'Not found'}`);
+            log(`Current tenant: ${currentTenant ? 'Present' : 'Not found'}`);
+            log(`Theme: ${theme || 'default'}`);
+            
+            // Check for any other keys that might affect the app
+            const allKeys = Object.keys(localStorage);
+            log(`Total localStorage keys: ${allKeys.length}`);
+            log(`All keys: ${allKeys.join(', ')}`);
+        }
+
+        function clearAuth() {
+            clearResults();
+            log('Clearing authentication data...');
+            
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('current_user');
+            localStorage.removeItem('current_tenant');
+            
+            log('Auth data cleared. You may need to refresh the main app.', 'success');
+        }
+
+        // Auto-run some tests when the page loads
+        window.onload = function() {
+            checkLocalStorage();
+        };
+    </script>
+</body>
+</html>

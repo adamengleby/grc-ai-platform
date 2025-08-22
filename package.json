@@ -1,0 +1,51 @@
+{
+  "name": "grc-multi-tenant-dashboard",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Multi-tenant SaaS dashboard for AI-powered GRC platform with MCP server integration",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "mcp-server": "node grc-mcp-server.js",
+    "mcp-proxy": "node mcp-proxy-server.js",
+    "http-server": "node grc-http-server.js",
+    "start-all": "concurrently \"npm run http-server\" \"npm run dev\""
+  },
+  "dependencies": {
+    "@azure/msal-browser": "^3.5.0",
+    "@azure/msal-react": "^2.0.5",
+    "@modelcontextprotocol/sdk": "^1.17.3",
+    "clsx": "^2.0.0",
+    "cors": "^2.8.5",
+    "date-fns": "^2.30.0",
+    "express": "^5.1.0",
+    "lucide-react": "^0.294.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-query": "^3.39.3",
+    "react-router-dom": "^6.20.1",
+    "recharts": "^2.8.0",
+    "zustand": "^4.4.7"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.37",
+    "@types/react-dom": "^18.2.15",
+    "@typescript-eslint/eslint-plugin": "^6.10.0",
+    "@typescript-eslint/parser": "^6.10.0",
+    "@vitejs/plugin-react": "^4.1.1",
+    "autoprefixer": "^10.4.16",
+    "concurrently": "^9.2.0",
+    "eslint": "^8.53.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.4",
+    "postcss": "^8.4.31",
+    "tailwindcss": "^3.3.5",
+    "typescript": "^5.2.2",
+    "vite": "^4.5.0",
+    "vitest": "^0.34.6"
+  }
+}
