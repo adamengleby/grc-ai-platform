@@ -1,0 +1,148 @@
+{
+  "name": "development",
+  "displayName": "Development Environment",
+  "description": "Local development environment with debugging enabled",
+  "version": "1.0.0",
+  "lastUpdated": "2024-01-01T00:00:00Z",
+  
+  "application": {
+    "nodeEnv": "development",
+    "logLevel": "debug",
+    "port": 3000,
+    "enableDebugLogs": true,
+    "enableHotReload": true,
+    "enableSourceMaps": true
+  },
+
+  "azure": {
+    "region": "australiaeast",
+    "resourceGroupName": "rg-grc-ai-platform-dev",
+    "environment": "dev",
+    "subscription": {
+      "id": "your-dev-subscription-id",
+      "name": "GRC AI Platform Development"
+    },
+    "cosmosDb": {
+      "accountName": "cosmos-grc-ai-dev",
+      "databaseName": "grc-ai-platform-dev",
+      "consistencyLevel": "Session",
+      "enableMultipleWriteLocations": false
+    },
+    "keyVault": {
+      "name": "kv-grc-ai-dev",
+      "enableRbacAuthorization": true,
+      "enablePurgeProtection": false
+    },
+    "storage": {
+      "accountName": "stgrcaidev",
+      "tier": "Standard",
+      "replication": "LRS"
+    },
+    "appInsights": {
+      "name": "ai-grc-ai-dev",
+      "applicationType": "web",
+      "samplingPercentage": 100
+    }
+  },
+
+  "multiTenant": {
+    "enableTenantIsolation": true,
+    "defaultTier": "development",
+    "maxTenantsPerSubscription": 10,
+    "enableAutoProvisioning": true,
+    "tenantTimeoutMinutes": 30
+  },
+
+  "security": {
+    "enableHelmetSecurity": true,
+    "enableRateLimiting": true,
+    "rateLimitWindowMs": 900000,
+    "rateLimitMaxRequests": 1000,
+    "enableAuditLogs": true,
+    "auditLogRetentionDays": 90,
+    "cors": {
+      "origins": [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://localhost:5173",
+        "https://localhost:3000"
+      ],
+      "credentials": true
+    }
+  },
+
+  "mcp": {
+    "enableHealthChecks": true,
+    "healthCheckIntervalMs": 60000,
+    "serverTimeoutMs": 30000,
+    "enableSignatureVerification": false,
+    "rateLimitPerMinute": 1000,
+    "allowedOrigins": [
+      "http://localhost:5173",
+      "http://localhost:3000"
+    ]
+  },
+
+  "ai": {
+    "defaultProvider": "azure-openai",
+    "defaultModel": "gpt-4",
+    "defaultMaxTokens": 4000,
+    "defaultTemperature": 0.7,
+    "enableContentFiltering": true,
+    "enablePiiDetection": true,
+    "enableUsageLogging": true
+  },
+
+  "caching": {
+    "enableRedis": true,
+    "defaultTtlSeconds": 300,
+    "maxCacheSize": 1000,
+    "redis": {
+      "host": "localhost",
+      "port": 6379,
+      "database": 0
+    }
+  },
+
+  "monitoring": {
+    "enablePrometheusMetrics": true,
+    "metricsPort": 9090,
+    "enableOpenTelemetry": true,
+    "enablePerformanceMonitoring": true,
+    "slowQueryThresholdMs": 1000,
+    "memoryUsageThresholdPercent": 85
+  },
+
+  "testing": {
+    "enableTestFixtures": true,
+    "testTenantId": "test-tenant-dev",
+    "enableMockServices": true,
+    "testTimeoutMs": 30000
+  },
+
+  "features": {
+    "enableNewTenantOnboarding": true,
+    "enableAdvancedAnalytics": true,
+    "enableMcpServerRegistry": true,
+    "enableBulkOperations": true,
+    "enableExperimentalFeatures": true
+  },
+
+  "integrations": {
+    "webhook": {
+      "timeoutMs": 30000,
+      "retryAttempts": 3,
+      "enableSignatureVerification": false
+    },
+    "externalApi": {
+      "rateLimitPerMinute": 1000,
+      "timeoutMs": 30000
+    }
+  },
+
+  "backup": {
+    "enabled": false,
+    "frequency": "daily",
+    "retentionDays": 7
+  }
+}

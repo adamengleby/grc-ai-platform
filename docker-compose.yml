@@ -1,0 +1,240 @@
+# Docker Compose for GRC AI Platform Development Environment
+# Multi-tenant SaaS platform with complete local development stack
+
+version: '3.8'
+
+services:
+  # Frontend Application
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: grc-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./packages/frontend:/app/packages/frontend
+      - ./packages/shared:/app/packages/shared
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - VITE_API_BASE_URL=http://localhost:3001
+      - VITE_MCP_SERVER_URL=http://localhost:3002
+      - VITE_AZURE_AD_B2C_TENANT_ID=${AZURE_AD_B2C_TENANT_ID}
+      - VITE_AZURE_AD_B2C_CLIENT_ID=${AZURE_AD_B2C_CLIENT_ID}
+    depends_on:
+      - backend
+      - mcp-server
+    networks:
+      - grc-network
+    restart: unless-stopped
+
+  # Backend API Server
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: grc-backend
+    ports:
+      - "3001:3001"
+      - "9229:9229"  # Debug port
+    volumes:
+      - ./packages/backend:/app/packages/backend
+      - ./packages/shared:/app/packages/shared
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - LOG_LEVEL=debug
+      - COSMOS_DB_ENDPOINT=${COSMOS_DB_ENDPOINT}
+      - COSMOS_DB_KEY=${COSMOS_DB_KEY}
+      - AZURE_KEY_VAULT_URL=${AZURE_KEY_VAULT_URL}
+      - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
+      - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET}
+      - AZURE_TENANT_ID=${AZURE_TENANT_ID}
+      - ENABLE_AUDIT_LOGS=true
+      - ENABLE_TENANT_ISOLATION=true
+    depends_on:
+      - cosmos-db-emulator
+      - redis
+    networks:
+      - grc-network
+    restart: unless-stopped
+    command: ["npm", "run", "dev:backend", "--", "--inspect=0.0.0.0:9229"]
+
+  # MCP Server
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: grc-mcp-server
+    ports:
+      - "3002:3002"
+      - "9230:9230"  # Debug port
+    volumes:
+      - ./packages/mcp-server:/app/packages/mcp-server
+      - ./packages/shared:/app/packages/shared
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - PORT=3002
+      - LOG_LEVEL=debug
+      - MCP_REGISTRY_URL=http://localhost:3001/api/mcp-registry
+      - AZURE_KEY_VAULT_URL=${AZURE_KEY_VAULT_URL}
+      - ENABLE_PRIVACY_PROTECTION=true
+      - ENABLE_AUDIT_LOGS=true
+    depends_on:
+      - backend
+    networks:
+      - grc-network
+    restart: unless-stopped
+    command: ["npm", "run", "dev:mcp", "--", "--inspect=0.0.0.0:9230"]
+
+  # Cosmos DB Emulator (for local development)
+  cosmos-db-emulator:
+    image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
+    container_name: grc-cosmos-emulator
+    ports:
+      - "8081:8081"
+      - "10251:10251"
+      - "10252:10252"
+      - "10253:10253"
+      - "10254:10254"
+    environment:
+      - AZURE_COSMOS_EMULATOR_PARTITION_COUNT=10
+      - AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE=true
+    volumes:
+      - cosmos-data:/data/db
+    networks:
+      - grc-network
+    restart: unless-stopped
+
+  # Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    container_name: grc-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-devpassword}
+    networks:
+      - grc-network
+    restart: unless-stopped
+
+  # Nginx reverse proxy (for local HTTPS and load balancing)
+  nginx:
+    image: nginx:alpine
+    container_name: grc-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend
+      - mcp-server
+    networks:
+      - grc-network
+    restart: unless-stopped
+
+  # Azure Storage Emulator (Azurite)
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: grc-azurite
+    ports:
+      - "10000:10000"  # Blob service
+      - "10001:10001"  # Queue service
+      - "10002:10002"  # Table service
+    volumes:
+      - azurite-data:/data
+    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0
+    networks:
+      - grc-network
+    restart: unless-stopped
+
+  # Elasticsearch for audit logging and search
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.9.0
+    container_name: grc-elasticsearch
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - grc-network
+    restart: unless-stopped
+
+  # Kibana for log visualization
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.9.0
+    container_name: grc-kibana
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    networks:
+      - grc-network
+    restart: unless-stopped
+
+  # Test runner for CI/CD integration
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+    container_name: grc-test-runner
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=test
+      - CI=true
+    networks:
+      - grc-network
+    profiles:
+      - testing
+
+  # Security scanner
+  security-scanner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: security-scan
+    container_name: grc-security-scanner
+    volumes:
+      - .:/scan-target:ro
+    networks:
+      - grc-network
+    profiles:
+      - security
+
+networks:
+  grc-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  cosmos-data:
+    driver: local
+  redis-data:
+    driver: local
+  azurite-data:
+    driver: local
+  elasticsearch-data:
+    driver: local
