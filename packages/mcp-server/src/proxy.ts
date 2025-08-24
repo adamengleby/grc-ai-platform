@@ -31,7 +31,7 @@ async function connectToMcpServer() {
     // Create transport and client
     const transport = new StdioClientTransport({
       command: 'npx',
-      args: ['tsx', 'packages/mcp-server/src/index.ts'],
+      args: ['tsx', 'src/index.ts'],
       env: Object.fromEntries(
         Object.entries(process.env).filter(([, value]) => value !== undefined)
       ) as Record<string, string>

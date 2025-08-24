@@ -518,6 +518,7 @@ class ArcherAPIClient {
   private applicationCache: ArcherApplication[] = [];
   private fieldCache: Map<number, ArcherField[]> = new Map();
   private levelCache: LevelMapping[] = []; // NEW: Cache for level mappings
+  private recordCache: Map<string, { data: any; timestamp: number; ttl: number }> = new Map(); // NEW: Record caching
   public dataTransformer: ArcherDataTransformer; // NEW: Data transformer
   public privacyProtector: PrivacyProtector; // NEW: Privacy protection
 
@@ -548,6 +549,52 @@ class ArcherAPIClient {
       preserveStructure: true,
       customSensitiveFields: process.env.CUSTOM_SENSITIVE_FIELDS?.split(',') || []
     });
+  }
+
+  // NEW: Cache management methods
+  private generateCacheKey(applicationName: string, pageSize: number, pageNumber: number, includeFullData: boolean): string {
+    return `${applicationName}:${pageSize}:${pageNumber}:${includeFullData}`;
+  }
+
+  private getCachedData(cacheKey: string): any | null {
+    const cached = this.recordCache.get(cacheKey);
+    if (!cached) return null;
+    
+    const now = Date.now();
+    if (now > cached.timestamp + cached.ttl) {
+      // Cache expired
+      this.recordCache.delete(cacheKey);
+      return null;
+    }
+    
+    console.error(`🚀 Using cached data for ${cacheKey} (${Math.round((cached.timestamp + cached.ttl - now) / 1000)}s remaining)`);
+    return cached.data;
+  }
+
+  private setCachedData(cacheKey: string, data: any, ttlMinutes: number = 30): void {
+    this.recordCache.set(cacheKey, {
+      data: data,
+      timestamp: Date.now(),
+      ttl: ttlMinutes * 60 * 1000 // Convert minutes to milliseconds
+    });
+    console.error(`💾 Cached data for ${cacheKey} (TTL: ${ttlMinutes} minutes)`);
+  }
+
+  private clearExpiredCache(): void {
+    const now = Date.now();
+    for (const [key, cached] of this.recordCache.entries()) {
+      if (now > cached.timestamp + cached.ttl) {
+        this.recordCache.delete(key);
+      }
+    }
+  }
+
+  public getCacheStats(): { totalCached: number; cacheKeys: string[] } {
+    this.clearExpiredCache(); // Clean up first
+    return {
+      totalCached: this.recordCache.size,
+      cacheKeys: Array.from(this.recordCache.keys())
+    };
   }
 
   // Login to Archer and get session token
@@ -1241,6 +1288,13 @@ class ArcherAPIClient {
       
       console.error(`🔗 Using Level-based ContentAPI URL: ${contentApiUrl}`);
       
+      // NEW: Check cache first
+      const cacheKey = this.generateCacheKey(app.Name, pageSize, pageNumber, includeFullData);
+      const cachedResult = this.getCachedData(cacheKey);
+      if (cachedResult) {
+        return cachedResult;
+      }
+      
       // OPTIMIZATION: Smart data fetching based on requirements
       let allRecords: any[] = [];
       let pageRecords: any[] = [];
@@ -1267,17 +1321,36 @@ class ArcherAPIClient {
           totalCount = result.totalCount;
           console.error(`🎯 Retrieved page ${pageNumber} (${pageRecords.length} records) from ${app.Name}`);
         } catch (pageError: any) {
-          console.error(`⚠️ Paged retrieval failed, falling back to full retrieval: ${pageError?.message || pageError}`);
-          // Fallback to full retrieval
-          try {
-            allRecords = await this.getAllRecordsAtOnce(contentApiUrl);
-          } catch (topAllError: any) {
-            allRecords = await this.getAllRecordsWithPagination(contentApiUrl);
+          console.error(`⚠️ Paged retrieval failed: ${pageError?.message || pageError}`);
+          
+          // Check if this is a 401 permission error
+          if (pageError.response?.status === 401) {
+            console.error(`🚫 ContentAPI access denied (401) for ${app.Name}. Trying traditional Web Services API...`);
+            try {
+              // Fallback to traditional Web Services API
+              allRecords = await this.getRecordsViaWebServicesAPI(app.Id, pageSize);
+              totalCount = allRecords.length;
+              const startIndex = (pageNumber - 1) * pageSize;
+              const endIndex = Math.min(startIndex + pageSize, totalCount);
+              pageRecords = allRecords.slice(startIndex, endIndex);
+              console.error(`✅ Retrieved ${allRecords.length} records via Web Services API fallback`);
+            } catch (wsError: any) {
+              console.error(`❌ Web Services API also failed: ${wsError.message}`);
+              throw new Error(`Both ContentAPI and Web Services API failed. ContentAPI: 401 Unauthorized. Web Services: ${wsError.message}`);
+            }
+          } else {
+            // Other error - try full retrieval as before
+            console.error(`⚠️ Falling back to full retrieval: ${pageError?.message || pageError}`);
+            try {
+              allRecords = await this.getAllRecordsAtOnce(contentApiUrl);
+            } catch (topAllError: any) {
+              allRecords = await this.getAllRecordsWithPagination(contentApiUrl);
+            }
+            totalCount = allRecords.length;
+            const startIndex = (pageNumber - 1) * pageSize;
+            const endIndex = Math.min(startIndex + pageSize, totalCount);
+            pageRecords = allRecords.slice(startIndex, endIndex);
           }
-          totalCount = allRecords.length;
-          const startIndex = (pageNumber - 1) * pageSize;
-          const endIndex = Math.min(startIndex + pageSize, totalCount);
-          pageRecords = allRecords.slice(startIndex, endIndex);
         }
       }
       
@@ -1303,7 +1376,7 @@ class ArcherAPIClient {
         transformationSummary = `Data transformation not available: ${transformError.message}`;
       }
       
-      return {
+      const result = {
         records: pageRecords,                    // Current page records for display
         allRecords: includeFullData ? allRecords : null, // OPTIMIZATION: Only include when requested
         totalCount: totalCount,
@@ -1327,6 +1400,12 @@ class ArcherAPIClient {
           retrievalMethod: includeFullData ? 'Level-based URL mapping with full retrieval' : 'Level-based URL mapping with pagination'
         }
       };
+      
+      // NEW: Cache the result for 30 minutes (or longer for full data sets)
+      const cacheTTL = includeFullData ? 45 : 30; // Cache full data longer since it's more expensive to retrieve
+      this.setCachedData(cacheKey, result, cacheTTL);
+      
+      return result;
       
     } catch (error: any) {
       console.error('❌ Error searching records:', error.message);
@@ -1864,11 +1943,100 @@ class ArcherAPIClient {
     }
   }
 
-  // OPTIMIZED: Get record statistics efficiently
+  // NEW: Fallback method using traditional Archer Web Services API for 401 ContentAPI errors
+  async getRecordsViaWebServicesAPI(applicationId: number, maxRecords: number = 100): Promise<any[]> {
+    if (!this.session?.sessionToken) {
+      throw new Error('No valid session token');
+    }
+
+    try {
+      console.error(`🔄 Using Web Services API for application ID: ${applicationId}`);
+      
+      // Use the traditional Archer search endpoint
+      const searchUrl = `/api/core/content/search`;
+      
+      const searchPayload = {
+        SearchObject: {
+          ModuleId: applicationId,
+          MaxResultCount: Math.min(maxRecords, 1000), // Limit to reasonable size
+          IsResultLimited: true,
+          SortFields: [],
+          SearchFields: [] // Empty means get all available fields
+        }
+      };
+
+      console.error(`📤 Making Web Services API request to: ${searchUrl}`);
+      console.error(`📝 Payload: ${JSON.stringify(searchPayload, null, 2)}`);
+
+      const response = await this.axiosInstance.post(searchUrl, searchPayload, {
+        headers: {
+          'Authorization': `Archer session-id="${this.session.sessionToken}"`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 60000
+      });
+
+      console.error(`📊 Web Services API Response status: ${response.status}`);
+
+      if (response.data && response.data.IsSuccessful) {
+        let records = [];
+        
+        if (response.data.RequestedObject && Array.isArray(response.data.RequestedObject.Records)) {
+          records = response.data.RequestedObject.Records;
+          
+          // Transform Web Services format to ContentAPI-like format
+          const transformedRecords = records.map(record => {
+            const transformed: any = {};
+            
+            // Add the basic IDs
+            transformed['@odata.id'] = record.ContentId;
+            transformed.ContentId = record.ContentId;
+            transformed.ModuleId = record.ModuleId;
+            transformed.LevelId = record.LevelId;
+            
+            // Process field values
+            if (record.FieldContents && Array.isArray(record.FieldContents)) {
+              record.FieldContents.forEach((field: any) => {
+                if (field.FieldId && field.Value !== null && field.Value !== undefined) {
+                  // Use field name if available, otherwise use FieldId
+                  const fieldKey = field.FieldName || `Field_${field.FieldId}`;
+                  transformed[fieldKey] = field.Value;
+                }
+              });
+            }
+            
+            return transformed;
+          });
+          
+          console.error(`✅ Web Services API retrieved ${transformedRecords.length} records with field data`);
+          return transformedRecords;
+        }
+      }
+
+      console.error(`⚠️ Web Services API returned unexpected format:`, JSON.stringify(response.data, null, 2).substring(0, 500));
+      return [];
+
+    } catch (error: any) {
+      console.error(`❌ Web Services API error:`, error.response ? 
+        `${error.response.status}: ${JSON.stringify(error.response.data)}` : 
+        error.message);
+      throw error;
+    }
+  }
+
+  // OPTIMIZED: Get record statistics efficiently  
   async getRecordStatistics(appName: string): Promise<any> {
     try {
+      // NEW: Check cache first for statistics
+      const statsCacheKey = `stats:${appName}`;
+      const cachedStats = this.getCachedData(statsCacheKey);
+      if (cachedStats) {
+        return cachedStats;
+      }
+
       // Get ALL records for comprehensive analysis - users expect complete statistics
-      const searchResults = await this.searchRecords(appName, 0, 1, true); // 0 = no limit, get all records
+      // Use large pageSize (1000) to get comprehensive data, pageNumber=1, includeFullData=true  
+      const searchResults = await this.searchRecords(appName, 1000, 1, true);
       const allRecords = searchResults.records;
       
       if (allRecords.length === 0) {
@@ -1920,7 +2088,7 @@ class ArcherAPIClient {
         return idField && record[idField] !== undefined ? record[idField] : 'No ID found';
       });
       
-      return {
+      const statsResult = {
         totalRecords: allRecords.length, // Use actual record count from retrieved data
         retrievedRecords: allRecords.length, // Clearly show how many records were analyzed
         applicationName: searchResults.applicationName,
@@ -1937,6 +2105,11 @@ class ArcherAPIClient {
         sampleRecordIds: sampleRecordIds,
         analysisScope: `Complete analysis of all ${allRecords.length} records`
       };
+      
+      // NEW: Cache statistics for 45 minutes (longer than regular data since statistics don't change frequently)
+      this.setCachedData(statsCacheKey, statsResult, 45);
+      
+      return statsResult;
       
     } catch (error: any) {
       console.error('❌ Error getting record statistics:', error.message);
@@ -2468,7 +2641,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'search_archer_records',
-        description: 'STEP 1: Retrieve raw data records from Archer applications. Use this FIRST to get the underlying data before any analysis. Essential for workflows requiring actual record data for counting, analysis, or evaluation.',
+        description: 'STEP 1: Retrieve raw data records from Archer applications. Use this FIRST to get the underlying data before any analysis. Essential for workflows requiring actual record data for counting, analysis, or evaluation. For complete dataset analysis, use includeFullData=true and maxRecordsToShow=10000.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -2490,6 +2663,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'boolean',
               description: 'Fetch ALL records (slower, for comprehensive analysis). Default: false (faster, paginated access)',
               default: false
+            },
+            maxRecordsToShow: {
+              type: 'number',
+              description: 'Maximum number of records to display in output. Set to high value (e.g., 10000) for full dataset analysis. Default: 50 for normal use, 10000 when getAllRecords=true',
+              default: 50
             }
           },
           required: ['applicationName']
@@ -2678,6 +2856,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             }
           },
           required: ['applicationName']
+        },
+      },
+      {
+        name: 'get_cache_status',
+        description: 'Check cache status and performance statistics for data retrieval optimization',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+          required: []
         },
       },
       {
@@ -2934,6 +3121,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             pageSize?: number;
             pageNumber?: number;
             includeFullData?: boolean;
+            getAllRecords?: boolean;
           };
           
           const applicationName = args.applicationName;
@@ -2942,9 +3130,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             throw new Error('applicationName is required and must be a string');
           }
           
-          const pageSize = Math.min(args.pageSize || 100, 500);
+          // NEW: Support getAllRecords option to bypass page size limits
+          const getAllRecords = args.getAllRecords || false;
+          const pageSize = getAllRecords ? 2000 : Math.min(args.pageSize || 100, 500); // Use large page size if getting all records
           const pageNumber = args.pageNumber || 1;
-          const includeFullData = args.includeFullData || false;
+          const includeFullData = args.includeFullData || getAllRecords; // Force full data if getting all records
+          
+          // NEW: Support maxRecordsToShow parameter for full dataset analysis
+          const maxRecordsToShow = args.maxRecordsToShow !== undefined ? args.maxRecordsToShow : (getAllRecords ? 10000 : 50);
           
           const searchResults = await archerClient.searchRecords(applicationName, pageSize, pageNumber, includeFullData);
           
@@ -2968,18 +3161,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
           
           if (includeFullData && searchResults.allRecords && searchResults.allRecords.length > 0) {
-            // OPTIMIZATION: Limit output size for very large datasets
-            const maxRecordsToShow = Math.min(searchResults.allRecords.length, 50);
-            const shouldTruncate = searchResults.allRecords.length > maxRecordsToShow;
+            // CONFIGURABLE: Allow full dataset analysis by controlling record display limit
+            const effectiveMaxRecords = Math.min(searchResults.allRecords.length, maxRecordsToShow);
+            const shouldTruncate = searchResults.allRecords.length > effectiveMaxRecords;
             
-            resultText += `📊 SHOWING ${shouldTruncate ? 'FIRST ' + maxRecordsToShow + ' OF ' : ''}${searchResults.allRecords.length} RECORDS WITH COMPLETE FIELD DATA:\n`;
+            resultText += `📊 SHOWING ${shouldTruncate ? 'FIRST ' + effectiveMaxRecords + ' OF ' : ''}${searchResults.allRecords.length} RECORDS WITH COMPLETE FIELD DATA:\n`;
             if (shouldTruncate) {
-              resultText += `⚠️ Output truncated to first ${maxRecordsToShow} records for performance\n`;
+              resultText += `⚠️ Output truncated to first ${effectiveMaxRecords} records for performance. Use maxRecordsToShow parameter to increase limit.\n`;
             }
             resultText += `${'='.repeat(80)}\n\n`;
             
-            // OPTIMIZATION: Only process the records we're going to display
-            const recordsToDisplay = searchResults.allRecords.slice(0, maxRecordsToShow);
+            // CONFIGURABLE: Only process the records we're going to display based on maxRecordsToShow parameter
+            const recordsToDisplay = searchResults.allRecords.slice(0, effectiveMaxRecords);
             
             // Apply privacy protection to display records only
             const protectedRecords = archerClient.privacyProtector.protectData(
@@ -3829,6 +4022,52 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               {
                 type: 'text',
                 text: `Error getting statistics: ${error.message}`,
+              },
+            ],
+          };
+        }
+
+      case 'get_cache_status':
+        try {
+          const cacheStats = archerClient.getCacheStats();
+          
+          let resultText = `🚀 Cache Status & Performance\n`;
+          resultText += `💾 Total Cached Items: ${cacheStats.totalCached}\n\n`;
+          
+          if (cacheStats.totalCached > 0) {
+            resultText += `📊 Cached Data Keys:\n`;
+            cacheStats.cacheKeys.forEach((key, index) => {
+              resultText += `${index + 1}. ${key}\n`;
+            });
+            resultText += `\n🔄 Cache Benefits:\n`;
+            resultText += `• Faster data retrieval for repeated queries\n`;
+            resultText += `• Reduced load on Archer API\n`;
+            resultText += `• Improved user experience with instant responses\n`;
+            resultText += `• 30-45 minute TTL ensures data freshness\n\n`;
+            resultText += `💡 Tip: When analyzing risk records, previously retrieved data is automatically cached for faster access.\n`;
+          } else {
+            resultText += `📝 No data currently cached\n`;
+            resultText += `Cache will be populated as you retrieve data from applications.\n\n`;
+            resultText += `⚡ Cache Features:\n`;
+            resultText += `• Automatic 30-45 minute data retention\n`;
+            resultText += `• Smart cache keys based on query parameters\n`;
+            resultText += `• Expired data automatically cleaned up\n`;
+          }
+          
+          return {
+            content: [
+              {
+                type: 'text',
+                text: resultText,
+              },
+            ],
+          };
+        } catch (error: any) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Error getting cache status: ${error.message}`,
               },
             ],
           };

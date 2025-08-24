@@ -74,6 +74,33 @@ export const useAuthStore = create<AuthState>()(
       set({ isLoading: true });
       
       try {
+        // Clear all chat sessions before logout
+        const currentState = get();
+        if (currentState.tenant?.id) {
+          try {
+            // Get all keys that match our chat pattern
+            const chatKeys = Object.keys(localStorage).filter(key => 
+              key.startsWith(`chat_session_${currentState.tenant.id}_`)
+            );
+            
+            // Remove all chat sessions for this tenant
+            chatKeys.forEach(key => localStorage.removeItem(key));
+            
+            console.log(`Cleared ${chatKeys.length} chat sessions on logout for tenant ${currentState.tenant.id}`);
+          } catch (error) {
+            console.warn('Failed to clear chat sessions on logout:', error);
+          }
+        }
+        
+        // Also clear global chat state
+        try {
+          if (currentState.tenant?.id) {
+            localStorage.removeItem(`chat_session_${currentState.tenant.id}_global`);
+          }
+        } catch (error) {
+          console.warn('Failed to clear global chat state on logout:', error);
+        }
+        
         await authService.logout();
         set({
           isAuthenticated: false,

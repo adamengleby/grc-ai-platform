@@ -20,6 +20,8 @@ import {
 } from 'lucide-react';
 import { MCPPrivacyConfig } from '@/features/settings/pages/SettingsPage';
 import { mcpBridge } from '@/lib/mcpBridge';
+import { setupArcherMCPServer, getMCPServerStatus } from '@/lib/mcpSetup';
+import { getAllCredentials } from '@/lib/credentialsApi';
 import AddMcpServerModal, { NewMcpServerConfig } from './AddMcpServerModal';
 import McpServerConfigModal from './McpServerConfigModal';
 
@@ -92,10 +94,18 @@ export default function MCPServerConfig({
     loadMcpServers();
   }, [config.tenantId]);
 
+  // Auto-refresh server status every 30 seconds
+  useEffect(() => {
+    if (servers.length > 0) {
+      const interval = setInterval(refreshServerStatus, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [servers.length]);
+
   const loadMcpServers = () => {
     setIsLoading(true);
     try {
-      const storageKey = `user_mcp_servers_${config.tenantId}`;
+      const storageKey = `tenant_mcp_servers_${config.tenantId}`;
       const stored = localStorage.getItem(storageKey);
       
       if (stored) {
@@ -124,7 +134,7 @@ export default function MCPServerConfig({
 
   const saveMcpServers = (updatedServers: UserMcpServer[]) => {
     try {
-      const storageKey = `user_mcp_servers_${config.tenantId}`;
+      const storageKey = `tenant_mcp_servers_${config.tenantId}`;
       localStorage.setItem(storageKey, JSON.stringify(updatedServers));
       setServers(updatedServers);
     } catch (error) {
@@ -133,17 +143,69 @@ export default function MCPServerConfig({
   };
 
   const handleAddServer = async (serverConfig: NewMcpServerConfig) => {
-    const newServer: UserMcpServer = {
-      ...serverConfig,
-      status: 'disconnected',
-      lastTested: new Date().toISOString()
-    };
-
-    const updatedServers = [...servers, newServer];
-    saveMcpServers(updatedServers);
-
-    // Sync to MCP bridge
-    await mcpBridge.syncSettingsToMcpServer(config.tenantId);
+    setIsLoading(true);
+    
+    try {
+      // If this is an Archer GRC server, use the setup utility
+      if (serverConfig.category === 'GRC' && serverConfig.connectionId) {
+        console.log('[MCP UI] Setting up Archer GRC MCP server with connection:', serverConfig.connectionId);
+        
+        const setupResult = await setupArcherMCPServer(
+          config.tenantId,
+          serverConfig.connectionId,
+          {
+            enablePrivacyMasking: true,
+            maskingLevel: 'moderate',
+            enableCaching: true
+          }
+        );
+        
+        if (setupResult.success) {
+          const newServer: UserMcpServer = {
+            ...serverConfig,
+            id: setupResult.serverId!,
+            status: setupResult.healthCheck?.isHealthy ? 'connected' : 'error',
+            lastTested: new Date().toISOString(),
+            errorMessage: setupResult.healthCheck?.isHealthy ? undefined : 'Health check failed'
+          };
+          
+          const updatedServers = [...servers, newServer];
+          saveMcpServers(updatedServers);
+          
+          console.log(`[MCP UI] Successfully set up MCP server: ${setupResult.serverId}`);
+        } else {
+          console.error('[MCP UI] Failed to setup MCP server:', setupResult.error);
+          // Still add to UI but mark as error
+          const newServer: UserMcpServer = {
+            ...serverConfig,
+            status: 'error',
+            lastTested: new Date().toISOString(),
+            errorMessage: setupResult.error
+          };
+          
+          const updatedServers = [...servers, newServer];
+          saveMcpServers(updatedServers);
+        }
+      } else {
+        // Legacy handling for non-Archer servers
+        const newServer: UserMcpServer = {
+          ...serverConfig,
+          status: 'disconnected',
+          lastTested: new Date().toISOString()
+        };
+        
+        const updatedServers = [...servers, newServer];
+        saveMcpServers(updatedServers);
+      }
+      
+      // Refresh server status after adding
+      await refreshServerStatus();
+      
+    } catch (error) {
+      console.error('[MCP UI] Error adding server:', error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleEditServer = (serverId: string) => {
@@ -209,6 +271,112 @@ export default function MCPServerConfig({
       enabledMcpServers: enabledServers
     };
     onConfigChange(updatedConfig);
+  };
+
+  // Add refresh server status function
+  const refreshServerStatus = async () => {
+    try {
+      const status = await getMCPServerStatus(config.tenantId);
+      
+      const updatedServers = servers.map(server => {
+        const statusInfo = status.servers.find(s => s.serverId === server.id);
+        if (statusInfo) {
+          return {
+            ...server,
+            status: statusInfo.isHealthy ? 'connected' as const : 'error' as const,
+            lastTested: statusInfo.lastHealthCheck || server.lastTested
+          };
+        }
+        return server;
+      });
+      
+      setServers(updatedServers);
+    } catch (error) {
+      console.warn('[MCP UI] Failed to refresh server status:', error);
+    }
+  };
+
+  // Add test connection function
+  const testConnection = async (serverId: string) => {
+    const serverIndex = servers.findIndex(s => s.id === serverId);
+    if (serverIndex === -1) return;
+
+    const updatedServers = [...servers];
+    updatedServers[serverIndex] = {
+      ...updatedServers[serverIndex],
+      status: 'testing'
+    };
+    setServers(updatedServers);
+
+    try {
+      // Use new MCP test functionality
+      const { testMCPServerConnection } = await import('@/lib/mcpSetup');
+      const testResult = await testMCPServerConnection(config.tenantId, serverId);
+
+      updatedServers[serverIndex] = {
+        ...updatedServers[serverIndex],
+        status: testResult.success ? 'connected' : 'error',
+        lastTested: new Date().toISOString(),
+        errorMessage: testResult.success ? 
+          `Response time: ${testResult.responseTime}ms, Tools: ${testResult.availableTools}` : 
+          testResult.error
+      };
+
+    } catch (error) {
+      updatedServers[serverIndex] = {
+        ...updatedServers[serverIndex],
+        status: 'error',
+        lastTested: new Date().toISOString(),
+        errorMessage: error instanceof Error ? error.message : 'Connection failed'
+      };
+    }
+
+    saveMcpServers(updatedServers);
+  };
+
+  // Quick setup function for Archer GRC
+  const setupArcherGRCServer = async () => {
+    try {
+      setIsLoading(true);
+      
+      // Get available Archer credentials
+      const credentials = await getAllCredentials();
+      const archerCredentials = credentials.filter(cred => 
+        cred.name?.toLowerCase().includes('archer') ||
+        cred.baseUrl?.toLowerCase().includes('archer')
+      );
+      
+      if (archerCredentials.length === 0) {
+        // Show alert that credentials are needed first
+        alert('No Archer GRC connections found. Please add an Archer connection in the Connections tab first.');
+        return;
+      }
+      
+      // Use first available Archer connection
+      const firstConnection = archerCredentials[0];
+      
+      const serverConfig: NewMcpServerConfig = {
+        id: `archer-grc-${Date.now()}`,
+        name: `Archer GRC - ${firstConnection.name}`,
+        description: 'RSA Archer GRC Platform integration with privacy protection and caching',
+        endpoint: 'http://localhost:3001', // Will be resolved by connection manager
+        connectionId: firstConnection.id,
+        connectionName: firstConnection.name,
+        category: 'GRC',
+        isEnabled: true,
+        createdAt: new Date().toISOString()
+      };
+      
+      await handleAddServer(serverConfig);
+      
+      console.log('[MCP UI] Quick setup completed for Archer GRC');
+      
+    } catch (error) {
+      console.error('[MCP UI] Quick setup failed:', error);
+      alert('Quick setup failed. Please try adding the server manually.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleConfigurationSave = async (serverId: string, serverConfig: McpServerConfig) => {
@@ -292,6 +460,43 @@ export default function MCPServerConfig({
           </Button>
         )}
       </div>
+
+      {/* Quick Setup for Archer GRC */}
+      {servers.length === 0 && canModify && (
+        <Card className="border border-blue-200 bg-blue-50/30">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-blue-100 rounded-lg">
+                  <Database className="h-5 w-5 text-blue-600" />
+                </div>
+                <div>
+                  <h4 className="font-medium text-blue-900">Quick Setup: Archer GRC</h4>
+                  <p className="text-sm text-blue-700">Connect to your existing Archer GRC instance</p>
+                </div>
+              </div>
+              <Button 
+                onClick={setupArcherGRCServer}
+                variant="outline" 
+                className="border-blue-300 text-blue-700 hover:bg-blue-100"
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    Setting up...
+                  </>
+                ) : (
+                  <>
+                    <Settings className="h-4 w-4 mr-2" />
+                    Quick Setup
+                  </>
+                )}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* MCP Servers List */}
       {servers.length === 0 ? (
@@ -392,6 +597,25 @@ export default function MCPServerConfig({
                     </div>
                     
                     <div className="flex items-center space-x-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => testConnection(server.id)}
+                        disabled={server.status === 'testing'}
+                        className="flex items-center space-x-1"
+                      >
+                        {server.status === 'testing' ? (
+                          <>
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            <span>Testing</span>
+                          </>
+                        ) : (
+                          <>
+                            <Wifi className="h-3 w-3" />
+                            <span>Test</span>
+                          </>
+                        )}
+                      </Button>
                       {canModify && (
                         <>
                           <Button

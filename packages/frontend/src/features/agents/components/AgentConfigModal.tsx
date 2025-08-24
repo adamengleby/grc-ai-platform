@@ -78,7 +78,7 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
     }
 
     // Load MCP servers
-    const mcpStorageKey = `user_mcp_servers_${tenantId}`;
+    const mcpStorageKey = `tenant_mcp_servers_${tenantId}`;
     const storedMcpServers = localStorage.getItem(mcpStorageKey);
     if (storedMcpServers) {
       const servers = JSON.parse(storedMcpServers);

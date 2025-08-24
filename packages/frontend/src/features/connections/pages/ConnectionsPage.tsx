@@ -1,15 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAuthStore } from '@/app/store/auth';
-import { Card, CardHeader, CardTitle, CardContent } from '@/app/components/ui/Card';
+import { Card, CardContent } from '@/app/components/ui/Card';
 import { Button } from '@/app/components/ui/Button';
 import { Input } from '@/app/components/ui/Input';
 import { Label } from '@/app/components/ui/Label';
-import { Badge } from '@/app/components/ui/Badge';
-import { Alert } from '@/app/components/ui/Alert';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/app/components/ui/Dialog';
 import { 
   Plus,
-  Settings,
   TestTube,
   RefreshCw,
   CheckCircle,
@@ -21,6 +18,7 @@ import {
   Trash2,
   Shield
 } from 'lucide-react';
+import { ArcherCredentials, getAllCredentials, saveCredentials, credentialsManager } from '@/lib/credentialsApi';
 
 interface Connection {
   id: string;
@@ -76,44 +74,94 @@ export const ConnectionsPage: React.FC = () => {
   }, [tenant?.id]);
 
   const loadConnections = async () => {
-    try {
-      // Load connections from localStorage with tenant isolation
-      const storageKey = `connections_tenant_${tenant?.id || 'default'}`;
-      console.log('Loading connections for tenant:', tenant?.id, 'with key:', storageKey);
-      const stored = localStorage.getItem(storageKey);
-      console.log('Raw stored data:', stored);
-      
-      if (stored) {
-        const savedConnections: Connection[] = JSON.parse(stored).map((conn: any) => ({
-          ...conn,
-          lastTested: conn.lastTested ? new Date(conn.lastTested) : undefined,
-          lastSync: conn.lastSync ? new Date(conn.lastSync) : undefined
-        }));
-        console.log('Loaded', savedConnections.length, 'saved connections:', savedConnections);
-        setConnections(savedConnections);
-      } else {
-        console.log('No stored connections found, starting with empty list');
-        // Start with empty connections list
-        setConnections([]);
-      }
-    } catch (error) {
-      console.error('Error loading connections:', error);
+    if (!tenant?.id) {
+      console.log('No tenant ID available, skipping connection load');
       setConnections([]);
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      console.log('Loading connections for tenant:', tenant.id, 'using credentials API');
+      
+      // Set tenant context for secure partitioning
+      credentialsManager.setTenantContext(tenant.id);
+      
+      // Load connections from secure credentials API
+      const credentialsList = await getAllCredentials();
+      console.log('Loaded', credentialsList.length, 'credentials:', credentialsList);
+      
+      // Convert ArcherCredentials to Connection format for UI compatibility
+      const convertedConnections: Connection[] = credentialsList.map((cred: ArcherCredentials) => {
+        // Parse host and port from baseUrl
+        let host = cred.baseUrl;
+        let port = 443; // default
+        
+        try {
+          const url = new URL(cred.baseUrl);
+          host = url.hostname;
+          port = url.port ? parseInt(url.port) : (url.protocol === 'https:' ? 443 : 80);
+        } catch (e) {
+          // If URL parsing fails, try to extract from baseUrl format
+          const match = cred.baseUrl.match(/^https?:\/\/([^:]+):?(\d+)?/);
+          if (match) {
+            host = match[1];
+            port = match[2] ? parseInt(match[2]) : 443;
+          }
+        }
+
+        return {
+          id: cred.id,
+          name: cred.name,
+          type: 'archer-grc', // All credentials from API are Archer connections
+          host: host,
+          port: port,
+          username: cred.username,
+          password: '', // Don't expose password in UI
+          database: '',
+          instanceName: cred.instanceName || cred.instanceId,
+          description: `Archer instance: ${cred.instanceName || cred.instanceId}`,
+          status: cred.status,
+          lastTested: cred.lastTested ? new Date(cred.lastTested) : undefined,
+          lastSync: undefined,
+          isEnabled: true
+        };
+      });
+      
+      console.log('Converted', convertedConnections.length, 'connections for UI:', convertedConnections);
+      setConnections(convertedConnections);
+      
+    } catch (error) {
+      console.error('Error loading connections from credentials API:', error);
+      setConnections([]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Debug function to clear all connection-related localStorage
+  // Debug function to clear all connection-related data
   const clearAllConnectionData = () => {
     console.log('=== CLEARING ALL CONNECTION DATA ===');
     console.log('All localStorage keys:', Object.keys(localStorage));
     
-    // Clear all connection-related keys
+    // Clear all connection-related keys (legacy localStorage)
     Object.keys(localStorage).forEach(key => {
       if (key.includes('connection') || key.includes('credential') || key.includes('mcp')) {
         console.log('Removing localStorage key:', key);
         localStorage.removeItem(key);
       }
     });
+    
+    // Also clear credentials API data if tenant is available
+    if (tenant?.id) {
+      try {
+        credentialsManager.setTenantContext(tenant.id);
+        credentialsManager.clearAllCredentials();
+        console.log('Cleared credentials API data for tenant:', tenant.id);
+      } catch (error) {
+        console.error('Error clearing credentials API data:', error);
+      }
+    }
     
     // Reload connections
     loadConnections();
@@ -123,13 +171,42 @@ export const ConnectionsPage: React.FC = () => {
   (window as any).clearAllConnectionData = clearAllConnectionData;
 
   const saveConnections = async (updatedConnections: Connection[]) => {
+    if (!tenant?.id) {
+      console.error('No tenant ID available, cannot save connections');
+      return;
+    }
+
     try {
-      // Save connections to localStorage with tenant isolation
-      const storageKey = `connections_tenant_${tenant?.id || 'default'}`;
-      console.log('Saving connections:', updatedConnections.length, 'connections for tenant:', tenant?.id);
-      localStorage.setItem(storageKey, JSON.stringify(updatedConnections));
+      console.log('Saving connections:', updatedConnections.length, 'connections for tenant:', tenant.id);
+      
+      // Set tenant context for secure partitioning
+      credentialsManager.setTenantContext(tenant.id);
+      
+      // Convert Connection objects to ArcherCredentials format and save each one
+      for (const connection of updatedConnections) {
+        if (connection.type === 'archer-grc') {
+          const credentials: ArcherCredentials = {
+            id: connection.id,
+            name: connection.name,
+            baseUrl: `https://${connection.host}:${connection.port}`,
+            username: connection.username || '',
+            password: connection.password || '', // Will be encrypted by API
+            instanceId: connection.instanceName || '',
+            instanceName: connection.instanceName || '',
+            userDomainId: '1', // Default user domain
+            isDefault: false, // Will be set appropriately
+            created: new Date().toISOString(),
+            lastTested: connection.lastTested?.toISOString(),
+            status: connection.status,
+            lastError: undefined
+          };
+          
+          await saveCredentials(credentials);
+        }
+      }
+      
       setConnections(updatedConnections);
-      console.log('Successfully saved connections');
+      console.log('Successfully saved connections to credentials API');
     } catch (error) {
       console.error('Error saving connections:', error);
       alert('Failed to save connections: ' + (error as Error).message);
@@ -182,9 +259,10 @@ export const ConnectionsPage: React.FC = () => {
         updatedConnections = [...connections, newConnection];
       }
 
-      // Save to persistent storage
+      // Save to credentials API (this will handle encryption and secure storage)
       await saveConnections(updatedConnections);
-
+      
+      // Close modal and reset form
       setIsAddModalOpen(false);
       setEditingConnection(null);
       setFormData({
@@ -195,37 +273,87 @@ export const ConnectionsPage: React.FC = () => {
         username: '',
         password: '',
         database: '',
-        instanceName: '', // Reset instanceName field
+        instanceName: '',
         description: ''
       });
+      
+      // Reload connections to show updated data
+      await loadConnections();
+      
     } catch (error) {
       console.error('Error saving connection:', error);
+      alert('Failed to save connection: ' + (error as Error).message);
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleTestConnection = async (connectionId: string) => {
+    if (!tenant?.id) {
+      alert('Cannot test connection: No tenant context available');
+      return;
+    }
+
     setTestingConnection(connectionId);
     try {
-      // Mock test - in real app, this would test actual connection
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Set tenant context for secure partitioning
+      credentialsManager.setTenantContext(tenant.id);
       
-      setConnections(prev => prev.map(conn => 
-        conn.id === connectionId 
-          ? { 
-              ...conn, 
-              status: Math.random() > 0.3 ? 'connected' : 'error',
-              lastTested: new Date()
-            }
-          : conn
-      ));
+      // Load the specific credential to test
+      const allCredentials = await getAllCredentials();
+      const credentialToTest = allCredentials.find(cred => cred.id === connectionId);
+      
+      if (!credentialToTest) {
+        throw new Error('Connection not found in credentials store');
+      }
+
+      console.log(`Testing connection: ${credentialToTest.name}`);
+      
+      // Use the credentials API's built-in test functionality
+      const testResult = await credentialsManager.testConnection(credentialToTest);
+      
+      // Update the credential's status based on test result
+      const updatedCredential = {
+        ...credentialToTest,
+        status: testResult.success ? 'connected' as const : 'error' as const,
+        lastTested: new Date().toISOString(),
+        lastError: testResult.success ? undefined : testResult.error
+      };
+      
+      // Save the updated status
+      await saveCredentials(updatedCredential);
+      
+      // Reload connections to show updated status
+      await loadConnections();
+      
+      // Show user feedback
+      if (testResult.success) {
+        alert(`✅ Connection "${credentialToTest.name}" test successful!\n${testResult.message}`);
+      } else {
+        alert(`❌ Connection "${credentialToTest.name}" test failed!\n${testResult.message || testResult.error}`);
+      }
+      
     } catch (error) {
-      setConnections(prev => prev.map(conn => 
-        conn.id === connectionId 
-          ? { ...conn, status: 'error' as const, lastTested: new Date() }
-          : conn
-      ));
+      console.error('Connection test error:', error);
+      alert(`Connection test failed: ${(error as Error).message}`);
+      
+      // Mark connection as error state
+      try {
+        const allCredentials = await getAllCredentials();
+        const credentialToUpdate = allCredentials.find(cred => cred.id === connectionId);
+        if (credentialToUpdate) {
+          const updatedCredential = {
+            ...credentialToUpdate,
+            status: 'error' as const,
+            lastTested: new Date().toISOString(),
+            lastError: (error as Error).message
+          };
+          await saveCredentials(updatedCredential);
+          await loadConnections();
+        }
+      } catch (saveError) {
+        console.error('Error updating connection status after test failure:', saveError);
+      }
     } finally {
       setTestingConnection(null);
     }
@@ -234,11 +362,30 @@ export const ConnectionsPage: React.FC = () => {
   const handleDeleteConnection = async (connectionId: string) => {
     if (!confirm('Are you sure you want to delete this connection?')) return;
     
+    if (!tenant?.id) {
+      alert('Cannot delete connection: No tenant context available');
+      return;
+    }
+    
     try {
       console.log('Deleting connection:', connectionId);
-      const updatedConnections = connections.filter(conn => conn.id !== connectionId);
-      console.log('Connections before delete:', connections.length, 'after delete:', updatedConnections.length);
-      await saveConnections(updatedConnections);
+      
+      // Set tenant context for secure partitioning
+      credentialsManager.setTenantContext(tenant.id);
+      
+      // Load current credentials and filter out the one to delete
+      const allCredentials = await getAllCredentials();
+      const updatedCredentials = allCredentials.filter(cred => cred.id !== connectionId);
+      
+      console.log('Credentials before delete:', allCredentials.length, 'after delete:', updatedCredentials.length);
+      
+      // Save the updated credentials list (this will remove the deleted one)
+      await credentialsManager.storeCredentials(updatedCredentials);
+      
+      // Reload connections to reflect the deletion
+      await loadConnections();
+      
+      console.log('Successfully deleted connection from credentials API');
     } catch (error) {
       console.error('Error deleting connection:', error);
       alert('Failed to delete connection: ' + (error as Error).message);
@@ -280,6 +427,14 @@ export const ConnectionsPage: React.FC = () => {
           Add Connection
         </Button>
       </div>
+
+      {/* Loading State */}
+      {isLoading && connections.length === 0 && (
+        <div className="flex items-center justify-center py-12">
+          <RefreshCw className="h-8 w-8 text-muted-foreground animate-spin mr-3" />
+          <span className="text-muted-foreground">Loading connections...</span>
+        </div>
+      )}
 
       {/* Connections List */}
       <div className="grid gap-4">
@@ -351,7 +506,7 @@ export const ConnectionsPage: React.FC = () => {
           </Card>
         ))}
 
-        {connections.length === 0 && (
+        {connections.length === 0 && !isLoading && (
           <div className="text-center py-12">
             <Database className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
             <h3 className="font-medium text-muted-foreground mb-2">No connections configured</h3>

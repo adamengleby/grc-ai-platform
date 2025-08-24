@@ -63,7 +63,7 @@ const AgentCard: React.FC<AgentCardProps> = ({
         setMetrics(agentMetrics);
         
         // Load MCP servers for this agent
-        const mcpStorageKey = `user_mcp_servers_${tenantId}`;
+        const mcpStorageKey = `tenant_mcp_servers_${tenantId}`;
         const allMcpServers = JSON.parse(localStorage.getItem(mcpStorageKey) || '[]');
         const enabledMcpServers = allMcpServers.filter((server: any) => 
           agent.enabledMcpServers.includes(server.id) && server.isEnabled
@@ -73,7 +73,7 @@ const AgentCard: React.FC<AgentCardProps> = ({
         if (enabledMcpServers.length === 0 && agent.enabledMcpServers.length > 0) {
           const defaultServers = agent.enabledMcpServers.map(serverId => ({
             id: serverId,
-            name: serverId === 'mcp-local-grc-server' ? 'Archer GRC Server' : serverId.replace(/^mcp-/, '').replace(/-/g, ' '),
+            name: serverId === 'archer-grc' ? 'Archer GRC Server' : serverId.replace(/^mcp-/, '').replace(/-/g, ' '),
             isEnabled: true
           }));
           setMcpServers(defaultServers);

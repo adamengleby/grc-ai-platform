@@ -55,7 +55,7 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({
       setAvailableLlmConfigs(llmConfigs);
 
       // Load available MCP servers
-      const mcpStorageKey = `user_mcp_servers_${tenantId}`;
+      const mcpStorageKey = `tenant_mcp_servers_${tenantId}`;
       const mcpServers = JSON.parse(localStorage.getItem(mcpStorageKey) || '[]');
       setAvailableMcpServers(mcpServers);
     } catch (error) {

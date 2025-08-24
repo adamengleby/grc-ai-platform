@@ -218,6 +218,7 @@ export const ArcherConnectionConfig: React.FC<ArcherConnectionConfigProps> = ({
         username: testData.username,
         password: testData.password,
         instanceId: testData.instanceName,
+        instanceName: testData.instanceName,
         userDomainId: testData.userDomain || '1',
         isDefault: false,
         created: new Date().toISOString(),

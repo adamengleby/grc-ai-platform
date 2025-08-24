@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import ReactMarkdown from 'react-markdown';
+import { EnhancedMarkdown } from '../../../components/ui/EnhancedMarkdown';
 import { Send, Download, User, Bot, AlertTriangle, CheckCircle, Clock, RefreshCw, ChevronDown, Database } from 'lucide-react';
 import { Button } from '@/app/components/ui/Button';
 import { Input } from '@/app/components/ui/Input';
@@ -10,6 +10,9 @@ import { createAgentService } from '@/lib/agentService';
 import { createLLMService, LLMResponse, LLMMessage } from '@/lib/llmService';
 import { useAuthStore } from '@/app/store/auth';
 import { credentialsManager, type ArcherCredentials } from '@/lib/credentialsApi';
+import { createTestMcpServerConfig, verifyTenantMcpConfig } from '@/lib/testMcpConfig';
+import { mcpConnectionManager } from '@/lib/mcpConnectionManager';
+import { runMCPIntegrationTests } from '@/lib/testMcpIntegration';
 import { clsx } from 'clsx';
 
 interface ChatMessage {
@@ -34,12 +37,64 @@ interface ConnectionStatus {
 export const ChatPage: React.FC = () => {
   const { tenant } = useAuthStore();
   
-  // State management
+  // Persistent chat state with localStorage
+  const getChatStorageKey = (agentId: string) => `chat_session_${tenant?.id}_${agentId}`;
+  const getGlobalChatKey = () => `chat_session_${tenant?.id}_global`;
+
+  const loadPersistedMessages = (agentId: string): ChatMessage[] => {
+    try {
+      const stored = localStorage.getItem(getChatStorageKey(agentId));
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        return parsed.map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp)
+        }));
+      }
+    } catch (error) {
+      console.warn('Failed to load persisted messages:', error);
+    }
+    return [];
+  };
+
+  const saveMessagesToStorage = (agentId: string, messages: ChatMessage[]) => {
+    try {
+      localStorage.setItem(getChatStorageKey(agentId), JSON.stringify(messages));
+    } catch (error) {
+      console.warn('Failed to save messages to storage:', error);
+    }
+  };
+
+  const loadPersistedAgent = (): AIAgent | null => {
+    try {
+      const stored = localStorage.getItem(getGlobalChatKey());
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        return parsed.selectedAgent;
+      }
+    } catch (error) {
+      console.warn('Failed to load persisted agent:', error);
+    }
+    return null;
+  };
+
+  const saveGlobalChatState = (agent: AIAgent | null) => {
+    try {
+      localStorage.setItem(getGlobalChatKey(), JSON.stringify({
+        selectedAgent: agent,
+        lastUpdated: new Date().toISOString()
+      }));
+    } catch (error) {
+      console.warn('Failed to save global chat state:', error);
+    }
+  };
+
+  // State management with persistence
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [availableAgents, setAvailableAgents] = useState<AIAgent[]>([]);
-  const [selectedAgent, setSelectedAgent] = useState<AIAgent | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<AIAgent | null>(loadPersistedAgent);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({
     isConnected: false,
     lastChecked: new Date(),
@@ -48,7 +103,8 @@ export const ChatPage: React.FC = () => {
     archerConnections: [],
     selectedConnection: null
   });
-  const [conversationHistory, setConversationHistory] = useState<LLMMessage[]>([]);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [conversationHistory, setConversationHistory] = useState<Record<string, LLMMessage[]>>({});
   const [error, setError] = useState<string | null>(null);
 
   // Refs
@@ -115,6 +171,21 @@ export const ChatPage: React.FC = () => {
         } catch (err) {
           console.error('Failed to load Archer credentials:', err);
         }
+
+        // Test: Run comprehensive MCP integration tests
+        if (tenant?.id) {
+          console.log('[Chat Test] Running comprehensive MCP integration tests...');
+          try {
+            const testsPassed = await runMCPIntegrationTests(tenant.id);
+            if (testsPassed) {
+              console.log('[Chat Test] ✅ All MCP integration tests passed!');
+            } else {
+              console.error('[Chat Test] ❌ Some MCP integration tests failed');
+            }
+          } catch (error) {
+            console.error('[Chat Test] Test execution failed:', error);
+          }
+        }
         
         setConnectionStatus({
           isConnected: true,
@@ -125,17 +196,40 @@ export const ChatPage: React.FC = () => {
           selectedConnection
         });
         
-        // Add welcome message
-        const welcomeMessage: ChatMessage = {
-          id: 'welcome-' + Date.now(),
-          type: 'agent',
-          content: `Hello! I'm ${selectedAgent.name}. ${selectedAgent.description} What would you like to analyze today?`,
-          timestamp: new Date()
-        };
-        setMessages([welcomeMessage]);
+        // Load existing messages or add welcome message if first time
+        const existingMessages = loadPersistedMessages(selectedAgent.id);
         
-        // Clear conversation history when switching agents
-        setConversationHistory([]);
+        if (existingMessages.length === 0) {
+          // Only add welcome message if no existing conversation
+          const welcomeMessage: ChatMessage = {
+            id: 'welcome-' + Date.now(),
+            type: 'agent',
+            content: `Hello! I'm ${selectedAgent.name}. ${selectedAgent.description} What would you like to analyze today?`,
+            timestamp: new Date()
+          };
+          setMessages([welcomeMessage]);
+          saveMessagesToStorage(selectedAgent.id, [welcomeMessage]);
+          // CRITICAL FIX: Initialize with ONLY this agent's empty history
+          console.log(`[ChatPage] Initializing new agent ${selectedAgent.id} with empty conversation history`);
+          setConversationHistory({ [selectedAgent.id]: [] }); // Only set this agent's history
+        } else {
+          // Load existing conversation
+          setMessages(existingMessages);
+          // Rebuild conversation history from messages ONLY for this specific agent
+          const history: LLMMessage[] = [];
+          existingMessages.forEach(msg => {
+            if (msg.type === 'user') {
+              history.push({ role: 'user', content: msg.content });
+            } else if (msg.type === 'agent' && !msg.content.includes('analyzing your request') && !msg.content.includes('Hello!')) {
+              history.push({ role: 'assistant', content: msg.content });
+            }
+          });
+          
+          // CRITICAL FIX: Set ONLY this agent's history, clear any other agent data
+          console.log(`[ChatPage] Loading agent ${selectedAgent.id} with ${history.length} conversation messages`);
+          console.log(`[ChatPage] Ensuring complete isolation from other agents`);
+          setConversationHistory({ [selectedAgent.id]: history }); // Only set this agent's history
+        }
         
       } catch (err) {
         console.error('Failed to initialize agent connection:', err);
@@ -152,10 +246,23 @@ export const ChatPage: React.FC = () => {
       }
     };
 
-    if (selectedAgent && tenant?.id) {
+    if (selectedAgent && tenant?.id && !isInitialized) {
       initializeConnection();
+      setIsInitialized(true);
     }
-  }, [selectedAgent, tenant?.id]);
+  }, [selectedAgent, tenant?.id, isInitialized]);
+
+  // Save messages to localStorage whenever messages change
+  useEffect(() => {
+    if (selectedAgent && messages.length > 0) {
+      saveMessagesToStorage(selectedAgent.id, messages);
+    }
+  }, [messages, selectedAgent]);
+
+  // Save selected agent whenever it changes
+  useEffect(() => {
+    saveGlobalChatState(selectedAgent);
+  }, [selectedAgent]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -199,8 +306,9 @@ export const ChatPage: React.FC = () => {
       // Create LLM service with integrated MCP support
       const llmService = createLLMService(tenant.id);
 
-      // Add user message to conversation history
-      const newHistory = [...conversationHistory, {
+      // Add user message to agent-specific conversation history
+      const currentHistory = conversationHistory[selectedAgent.id] || [];
+      const newHistory = [...currentHistory, {
         role: 'user' as const,
         content: currentMessage
       }];
@@ -210,7 +318,7 @@ export const ChatPage: React.FC = () => {
         selectedAgent,
         connectionStatus.llmConfig,
         currentMessage,
-        conversationHistory.slice(-10), // Keep last 10 messages for context
+        newHistory.slice(-10), // Keep last 10 messages for context
         connectionStatus.selectedConnection
       );
 
@@ -222,7 +330,7 @@ export const ChatPage: React.FC = () => {
           content: response.content
         }
       ];
-      setConversationHistory(updatedHistory);
+      setConversationHistory(prev => ({ ...prev, [selectedAgent.id]: updatedHistory }));
 
       // Update the loading message with actual response
       setMessages(prev => prev.map(msg => 
@@ -262,6 +370,83 @@ export const ChatPage: React.FC = () => {
       inputRef.current?.focus();
     }
   }, [inputMessage, isLoading, selectedAgent, connectionStatus, conversationHistory, tenant?.id]);
+
+  // Handle clearing chat for current agent
+  const handleClearChat = useCallback(() => {
+    if (!selectedAgent) return;
+    
+    // Clear from localStorage
+    try {
+      localStorage.removeItem(getChatStorageKey(selectedAgent.id));
+    } catch (error) {
+      console.warn('Failed to clear chat from storage:', error);
+    }
+    
+    // Reset state
+    const welcomeMessage: ChatMessage = {
+      id: 'welcome-' + Date.now(),
+      type: 'agent',
+      content: `Hello! I'm ${selectedAgent.name}. ${selectedAgent.description} What would you like to analyze today?`,
+      timestamp: new Date()
+    };
+    
+    setMessages([welcomeMessage]);
+    // CRITICAL FIX: Clear conversation history with complete isolation
+    console.log(`[ChatPage] Clearing chat for agent ${selectedAgent.id}`);
+    setConversationHistory({ [selectedAgent.id]: [] }); // Only set this agent's empty history
+    setError(null);
+  }, [selectedAgent]);
+
+  // Handle agent selection with persistence
+  const handleAgentSelect = useCallback((agent: AIAgent) => {
+    // Save current messages before switching
+    if (selectedAgent && messages.length > 0) {
+      saveMessagesToStorage(selectedAgent.id, messages);
+    }
+    
+    // Switch to new agent
+    setSelectedAgent(agent);
+    setIsInitialized(false);
+    setError(null);
+    
+    // CRITICAL FIX: Clear conversation context when switching agents
+    // This ensures complete isolation between agent conversations
+    console.log(`[ChatPage] Switching from agent ${selectedAgent?.id} to ${agent.id}`);
+    console.log(`[ChatPage] Clearing conversation history for isolation`);
+    setConversationHistory({}); // Clear all conversation history to prevent cross-contamination
+  }, [selectedAgent, messages]);
+
+  // Clear all chat sessions (for logout)
+  const clearAllChatSessions = useCallback(() => {
+    if (!tenant?.id) return;
+    
+    try {
+      // Get all keys that match our chat pattern
+      const chatKeys = Object.keys(localStorage).filter(key => 
+        key.startsWith(`chat_session_${tenant.id}_`)
+      );
+      
+      // Remove all chat sessions
+      chatKeys.forEach(key => localStorage.removeItem(key));
+      
+      console.log(`Cleared ${chatKeys.length} chat sessions for tenant ${tenant.id}`);
+    } catch (error) {
+      console.warn('Failed to clear all chat sessions:', error);
+    }
+  }, [tenant?.id]);
+
+  // Export clearAllChatSessions for use by logout functionality
+  React.useEffect(() => {
+    if (tenant?.id) {
+      // Store the clear function globally so it can be called on logout
+      (window as any).clearAllChatSessions = clearAllChatSessions;
+    }
+    
+    // Cleanup on unmount
+    return () => {
+      delete (window as any).clearAllChatSessions;
+    };
+  }, [clearAllChatSessions, tenant?.id]);
 
   // Handle export conversation
   const handleExportConversation = useCallback(() => {
@@ -367,6 +552,16 @@ export const ChatPage: React.FC = () => {
             <Button
               variant="outline"
               size="sm"
+              onClick={handleClearChat}
+              disabled={isLoading}
+              className="text-red-600 hover:text-red-700"
+            >
+              Clear Chat
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
               onClick={handleExportConversation}
               disabled={messages.length === 0}
             >
@@ -384,7 +579,7 @@ export const ChatPage: React.FC = () => {
               value={selectedAgent.id}
               onChange={(e) => {
                 const agent = availableAgents.find(a => a.id === e.target.value);
-                if (agent) setSelectedAgent(agent);
+                if (agent) handleAgentSelect(agent);
               }}
               className="appearance-none bg-white border border-gray-300 rounded-md px-4 py-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
             >
@@ -437,23 +632,9 @@ export const ChatPage: React.FC = () => {
               )}>
                 <div className="space-y-2">
                   <div className="text-sm markdown-content">
-                    <ReactMarkdown
-                      components={{
-                        h1: ({children}) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
-                        h2: ({children}) => <h2 className="text-base font-semibold mb-2 mt-4">{children}</h2>,
-                        h3: ({children}) => <h3 className="text-sm font-medium mb-1 mt-3">{children}</h3>,
-                        p: ({children}) => <p className="mb-2 leading-relaxed">{children}</p>,
-                        ul: ({children}) => <ul className="list-disc ml-4 mb-2 space-y-1">{children}</ul>,
-                        ol: ({children}) => <ol className="list-decimal ml-4 mb-2 space-y-1">{children}</ol>,
-                        li: ({children}) => <li className="text-sm">{children}</li>,
-                        strong: ({children}) => <strong className="font-semibold text-gray-900">{children}</strong>,
-                        em: ({children}) => <em className="italic">{children}</em>,
-                        code: ({children}) => <code className="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono">{children}</code>,
-                        blockquote: ({children}) => <blockquote className="border-l-4 border-gray-300 pl-4 italic text-gray-700 my-2">{children}</blockquote>
-                      }}
-                    >
+                    <EnhancedMarkdown>
                       {message.content}
-                    </ReactMarkdown>
+                    </EnhancedMarkdown>
                   </div>
                   
                   {message.isLoading && (
