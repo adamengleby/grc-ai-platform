@@ -1028,7 +1028,7 @@ How can I assist you today?`,
       
       if (mcpConnectionError) {
         return { 
-          content: `**${agent.name} Connection Status** ${agent.avatar || '🤖'}\n\n❌ **MCP Server Connection Failed**\n\n**Error**: ${mcpConnectionError}\n\n**Required**: Archer GRC MCP server must be running on localhost:3001\n\n**To resolve**: \n1. Start the Archer GRC MCP server\n2. Verify it's accessible at http://localhost:3001\n3. Check server logs for any startup errors\n\nOnce the server is running, I'll be able to access real Archer GRC tools for analysis.`,
+          content: `**${agent.name} Connection Status** ${agent.avatar || '🤖'}\n\n❌ **MCP Server Connection Failed**\n\n**Error**: ${mcpConnectionError}\n\n**Required**: Archer GRC MCP server must be running on localhost:3005\n\n**To resolve**: \n1. Start the Archer GRC MCP server\n2. Verify it's accessible at http://localhost:3005\n3. Check server logs for any startup errors\n\nOnce the server is running, I'll be able to access real Archer GRC tools for analysis.`,
           toolsUsed: ['connection_check']
         };
       }

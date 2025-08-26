@@ -14,6 +14,7 @@ import {
   Info
 } from 'lucide-react';
 import { ArcherCredentials, getAllCredentials } from '@/lib/credentialsApi';
+import credentialsManager from '@/lib/credentialsApi';
 import { useAuthStore } from '@/app/store/auth';
 
 interface McpServerConfigModalProps {
@@ -46,7 +47,7 @@ export default function McpServerConfigModal({
   currentConfig
 }: McpServerConfigModalProps) {
   const { tenant } = useAuthStore();
-  const [selectedConnectionId, setSelectedConnectionId] = useState<string>(currentConfig?.connectionId || '');
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string>('');
   const [availableConnections, setAvailableConnections] = useState<ArcherCredentials[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
@@ -56,6 +57,17 @@ export default function McpServerConfigModal({
   useEffect(() => {
     loadConnections();
   }, [tenant]);
+
+  // Initialize selected connection when modal opens or currentConfig changes
+  useEffect(() => {
+    if (isOpen && currentConfig?.connectionId) {
+      setSelectedConnectionId(currentConfig.connectionId);
+      console.log('[MCP Config Modal] Initializing with saved connection:', currentConfig.connectionId, currentConfig.connectionName);
+    } else if (isOpen && !currentConfig) {
+      setSelectedConnectionId('');
+      console.log('[MCP Config Modal] No saved configuration found, resetting selection');
+    }
+  }, [isOpen, currentConfig]);
 
   const loadConnections = async () => {
     if (!tenant) return;
@@ -84,13 +96,20 @@ export default function McpServerConfigModal({
     setMessage({ type: 'info', text: `Testing connection to ${selectedConnection.name}...` });
 
     try {
-      // Simulate connection test (replace with actual test logic)
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Use the credentials manager to test the connection
+      const testResult = await credentialsManager.testConnection(selectedConnection);
       
-      setMessage({ 
-        type: 'success', 
-        text: `Successfully connected to ${selectedConnection.name}. MCP server can access this connection.` 
-      });
+      if (testResult.success) {
+        setMessage({ 
+          type: 'success', 
+          text: `Successfully connected to ${selectedConnection.name}. Response time: ${testResult.details?.responseTime || 'N/A'}ms` 
+        });
+      } else {
+        setMessage({ 
+          type: 'error', 
+          text: `Connection test failed: ${testResult.error || testResult.message}` 
+        });
+      }
     } catch (error: any) {
       setMessage({ 
         type: 'error', 
@@ -100,6 +119,8 @@ export default function McpServerConfigModal({
       setIsTesting(false);
     }
   };
+
+  // Removed unused testConnectionViaBackend function
 
   const handleSave = () => {
     if (!selectedConnection) {

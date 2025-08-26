@@ -11,6 +11,7 @@
     "build": "npm run build --workspaces",
     "dev": "npm run dev --workspace=@grc-ai-platform/frontend",
     "dev:mcp": "npm run dev --workspace=@grc-ai-platform/mcp-server",
+    "dev:event-streaming": "npm run dev --workspace=@grc-platform/event-streaming",
     "lint": "npm run lint --workspaces",
     "lint:fix": "npm run lint:fix --workspaces",
     "type-check": "npm run type-check --workspaces",
@@ -19,7 +20,8 @@
     "clean": "npm run clean --workspaces && rm -rf node_modules packages/*/node_modules",
     "install:all": "npm install && npm run build --workspace=@grc-ai-platform/shared",
     "start:frontend": "npm run start --workspace=@grc-ai-platform/frontend",
-    "start:mcp": "npm run start --workspace=@grc-ai-platform/mcp-server"
+    "start:mcp": "npm run start --workspace=@grc-ai-platform/mcp-server",
+    "start:event-streaming": "npm run start --workspace=@grc-platform/event-streaming"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^6.14.0",
@@ -54,6 +56,7 @@
   "author": "Your Organization",
   "license": "UNLICENSED",
   "dependencies": {
-    "react-markdown": "^10.1.0"
+    "react-markdown": "^10.1.0",
+    "zod": "^4.1.1"
   }
 }

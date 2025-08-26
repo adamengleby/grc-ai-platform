@@ -4,17 +4,15 @@ import { useAuthStore } from '@/app/store/auth';
 import { useDashboardStore } from '@/app/store/dashboard';
 import { Button } from '@/app/components/ui/Button';
 import {
-  LayoutDashboard,
   Users,
   FileText,
   Shield,
   Bot,
-  MessageSquare,
   ChevronLeft,
   ChevronRight,
-  Brain,
   Link,
   Settings as SettingsIcon,
+  BarChart3,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -48,12 +46,6 @@ export const DashboardSidebar: React.FC = () => {
     {
       title: 'Overview',
       items: [
-        {
-          href: '/dashboard',
-          icon: <LayoutDashboard className="h-5 w-5" />,
-          label: 'Dashboard',
-          roles: ['TenantOwner', 'AgentUser', 'Auditor', 'ComplianceOfficer'],
-        },
       ]
     },
     {
@@ -66,17 +58,11 @@ export const DashboardSidebar: React.FC = () => {
           roles: ['TenantOwner', 'AgentUser'],
         },
         {
-          href: '/chat',
-          icon: <MessageSquare className="h-5 w-5" />,
-          label: 'GRC Chat',
-          roles: ['TenantOwner', 'AgentUser'],
-        },
-        {
-          href: '/ai-insights',
-          icon: <Brain className="h-5 w-5" />,
-          label: 'AI Insights',
-          roles: ['TenantOwner', 'AgentUser', 'ComplianceOfficer'],
-          badge: 'New',
+          href: '/analytics',
+          icon: <BarChart3 className="h-5 w-5" />,
+          label: 'Analytics',
+          roles: ['TenantOwner', 'AgentUser', 'ComplianceOfficer', 'Auditor', 'Platform Owner', 'admin'],
+          badge: 'Live',
         },
       ]
     },

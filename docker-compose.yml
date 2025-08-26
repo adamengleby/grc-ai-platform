@@ -93,6 +93,39 @@ services:
     restart: unless-stopped
     command: ["npm", "run", "dev:mcp", "--", "--inspect=0.0.0.0:9230"]
 
+  # Event Streaming Service
+  event-streaming:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: grc-event-streaming
+    ports:
+      - "3003:3003"
+      - "9231:9231"  # Debug port
+    volumes:
+      - ./packages/event-streaming:/app/packages/event-streaming
+      - ./packages/shared:/app/packages/shared
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - PORT=3003
+      - LOG_LEVEL=debug
+      - COSMOS_DB_ENDPOINT=${COSMOS_DB_ENDPOINT}
+      - COSMOS_DB_KEY=${COSMOS_DB_KEY}
+      - KAFKA_BROKER=kafka:9093
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-devpassword}
+    depends_on:
+      - backend
+      - kafka
+      - redis
+      - cosmos-db-emulator
+    networks:
+      - grc-network
+    restart: unless-stopped
+    command: ["npm", "run", "dev:event-streaming", "--", "--inspect=0.0.0.0:9231"]
+
   # Cosmos DB Emulator (for local development)
   cosmos-db-emulator:
     image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
@@ -222,6 +255,112 @@ services:
     profiles:
       - security
 
+  # Real-time streaming infrastructure
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: grc-zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper
+    networks:
+      - grc-network
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: grc-kafka
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: true
+      KAFKA_DELETE_TOPIC_ENABLE: true
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_BYTES: 1073741824
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    depends_on:
+      - zookeeper
+    networks:
+      - grc-network
+    restart: unless-stopped
+
+  # Stream processing engine
+  stream-processor:
+    image: apache/flink:1.18-java11
+    container_name: grc-stream-processor
+    ports:
+      - "8081:8081"
+    environment:
+      - FLINK_PROPERTIES=jobmanager.rpc.address:stream-processor
+    volumes:
+      - ./packages/stream-processor:/opt/flink/jobs
+      - flink-data:/opt/flink/data
+    command: jobmanager
+    depends_on:
+      - kafka
+    networks:
+      - grc-network
+    restart: unless-stopped
+
+  # Flink TaskManager
+  flink-taskmanager:
+    image: apache/flink:1.18-java11
+    container_name: grc-flink-taskmanager
+    environment:
+      - FLINK_PROPERTIES=jobmanager.rpc.address:stream-processor
+    volumes:
+      - ./packages/stream-processor:/opt/flink/jobs
+      - flink-data:/opt/flink/data
+    command: taskmanager
+    depends_on:
+      - stream-processor
+    networks:
+      - grc-network
+    restart: unless-stopped
+
+  # Vector database for semantic search
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: grc-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    volumes:
+      - qdrant-data:/qdrant/storage
+    networks:
+      - grc-network
+    restart: unless-stopped
+
+  # TimescaleDB for time-series analytics
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: grc-timescaledb
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=grc_analytics
+      - POSTGRES_USER=grc_user
+      - POSTGRES_PASSWORD=grc_dev_password
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+      - ./sql/init:/docker-entrypoint-initdb.d
+    networks:
+      - grc-network
+    restart: unless-stopped
+
 networks:
   grc-network:
     driver: bridge
@@ -237,4 +376,14 @@ volumes:
   azurite-data:
     driver: local
   elasticsearch-data:
+    driver: local
+  zookeeper-data:
+    driver: local
+  kafka-data:
+    driver: local
+  flink-data:
+    driver: local
+  qdrant-data:
+    driver: local
+  timescaledb-data:
     driver: local

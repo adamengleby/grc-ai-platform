@@ -185,12 +185,29 @@ export const ConnectionsPage: React.FC = () => {
       // Convert Connection objects to ArcherCredentials format and save each one
       for (const connection of updatedConnections) {
         if (connection.type === 'archer-grc') {
+          // For existing connections, preserve the password if not provided
+          let passwordToSave = connection.password || '';
+          
+          if (editingConnection && editingConnection.id === connection.id && !passwordToSave) {
+            // If this is an edit and password is empty, get the existing password
+            try {
+              const existingCredentials = await getAllCredentials();
+              const existingCred = existingCredentials.find(cred => cred.id === connection.id);
+              if (existingCred) {
+                passwordToSave = existingCred.password;
+                console.log('Preserving existing password for connection:', connection.name);
+              }
+            } catch (error) {
+              console.warn('Could not preserve existing password:', error);
+            }
+          }
+
           const credentials: ArcherCredentials = {
             id: connection.id,
             name: connection.name,
             baseUrl: `https://${connection.host}:${connection.port}`,
             username: connection.username || '',
-            password: connection.password || '', // Will be encrypted by API
+            password: passwordToSave,
             instanceId: connection.instanceName || '',
             instanceName: connection.instanceName || '',
             userDomainId: '1', // Default user domain
@@ -201,6 +218,7 @@ export const ConnectionsPage: React.FC = () => {
             lastError: undefined
           };
           
+          console.log('Saving credentials for connection:', connection.name, 'instanceName:', credentials.instanceName);
           await saveCredentials(credentials);
         }
       }

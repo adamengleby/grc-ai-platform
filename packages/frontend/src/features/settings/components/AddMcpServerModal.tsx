@@ -169,7 +169,7 @@ export default function AddMcpServerModal({
 
     try {
       const serverConfig: NewMcpServerConfig = {
-        id: editMode ? initialConfig!.id : `mcp-${Date.now()}`,
+        id: editMode ? initialConfig!.id : `mcp-${crypto.randomUUID()}`,
         name: formData.name.trim(),
         description: formData.description.trim() || `Custom MCP server: ${formData.name}`,
         endpoint: formData.endpoint.trim(),

@@ -80,13 +80,13 @@ export const useAuthStore = create<AuthState>()(
           try {
             // Get all keys that match our chat pattern
             const chatKeys = Object.keys(localStorage).filter(key => 
-              key.startsWith(`chat_session_${currentState.tenant.id}_`)
+              key.startsWith(`chat_session_${currentState.tenant!.id}_`)
             );
             
             // Remove all chat sessions for this tenant
             chatKeys.forEach(key => localStorage.removeItem(key));
             
-            console.log(`Cleared ${chatKeys.length} chat sessions on logout for tenant ${currentState.tenant.id}`);
+            console.log(`Cleared ${chatKeys.length} chat sessions on logout for tenant ${currentState.tenant!.id}`);
           } catch (error) {
             console.warn('Failed to clear chat sessions on logout:', error);
           }

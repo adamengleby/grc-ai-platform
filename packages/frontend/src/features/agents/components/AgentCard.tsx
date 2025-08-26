@@ -12,7 +12,8 @@ import {
   AlertCircle,
   Clock,
   Play,
-  Pause
+  Pause,
+  MessageSquare
 } from 'lucide-react';
 import { AIAgent } from '../../../types/agent';
 import { createAgentMetricsService, AgentMetrics } from '../../../lib/agentMetricsService';
@@ -22,13 +23,15 @@ interface AgentCardProps {
   tenantId: string;
   onToggle: (agentId: string, enabled: boolean) => void;
   onConfigure: (agent: AIAgent) => void;
+  onChat?: (agent: AIAgent) => void;
 }
 
 const AgentCard: React.FC<AgentCardProps> = ({ 
   agent, 
   tenantId, 
   onToggle, 
-  onConfigure 
+  onConfigure,
+  onChat
 }) => {
   const [metrics, setMetrics] = useState<AgentMetrics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -247,6 +250,19 @@ const AgentCard: React.FC<AgentCardProps> = ({
                 </>
               )}
             </Button>
+            {onChat && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onChat(agent)}
+                disabled={!agent.isEnabled}
+                className="text-xs"
+                title={agent.isEnabled ? `Chat with ${agent.name}` : "Enable agent to chat"}
+              >
+                <MessageSquare className="h-3 w-3 mr-1" />
+                Chat
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"

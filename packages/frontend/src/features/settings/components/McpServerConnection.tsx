@@ -123,7 +123,11 @@ export default function MCPServerConfig({
       const configKey = `mcp_server_configs_${config.tenantId}`;
       const storedConfigs = localStorage.getItem(configKey);
       if (storedConfigs) {
-        setServerConfigurations(JSON.parse(storedConfigs));
+        const parsedConfigs = JSON.parse(storedConfigs);
+        console.log('[MCP Connection] Loaded server configurations:', parsedConfigs);
+        setServerConfigurations(parsedConfigs);
+      } else {
+        console.log('[MCP Connection] No stored configurations found');
       }
     } catch (error) {
       console.error('Error loading MCP servers:', error);
@@ -356,10 +360,10 @@ export default function MCPServerConfig({
       const firstConnection = archerCredentials[0];
       
       const serverConfig: NewMcpServerConfig = {
-        id: `archer-grc-${Date.now()}`,
+        id: `mcp-${crypto.randomUUID()}`,
         name: `Archer GRC - ${firstConnection.name}`,
         description: 'RSA Archer GRC Platform integration with privacy protection and caching',
-        endpoint: 'http://localhost:3001', // Will be resolved by connection manager
+        endpoint: 'http://localhost:3005', // Analytics backend for Archer GRC integration
         connectionId: firstConnection.id,
         connectionName: firstConnection.name,
         category: 'GRC',
@@ -382,6 +386,9 @@ export default function MCPServerConfig({
   const handleConfigurationSave = async (serverId: string, serverConfig: McpServerConfig) => {
     if (!canModify) return;
 
+    console.log('[MCP Connection] Saving configuration for server:', serverId);
+    console.log('[MCP Connection] Server config:', serverConfig);
+
     // Update server configurations
     const updatedConfigs = {
       ...serverConfigurations,
@@ -392,6 +399,17 @@ export default function MCPServerConfig({
     // Save to localStorage
     const configKey = `mcp_server_configs_${config.tenantId}`;
     localStorage.setItem(configKey, JSON.stringify(updatedConfigs));
+    console.log('[MCP Connection] Saved configurations to localStorage:', updatedConfigs);
+    
+    // Verify the save worked by immediately reading back
+    const verification = localStorage.getItem(configKey);
+    if (verification) {
+      const parsedVerification = JSON.parse(verification);
+      console.log('[MCP Connection] Verification - localStorage contains:', parsedVerification);
+      console.log('[MCP Connection] Configuration exists for serverId?', !!parsedVerification[serverId]);
+    } else {
+      console.error('[MCP Connection] ERROR: Configuration was not saved to localStorage!');
+    }
 
     // Update server status
     const updatedServers = servers.map(s => 
@@ -406,7 +424,9 @@ export default function MCPServerConfig({
 
     // Sync to MCP bridge
     await mcpBridge.syncSettingsToMcpServer(config.tenantId);
-    setConfigModalOpen(null);
+    
+    // Don't close modal here - let the modal handle its own closure after showing success message
+    // setConfigModalOpen(null); // Removed to prevent race condition
   };
 
   const getStatusIcon = (status: UserMcpServer['status']) => {
@@ -708,10 +728,20 @@ export default function MCPServerConfig({
       {/* Configuration Modal */}
       {configModalOpen && (() => {
         const server = servers.find(s => s.id === configModalOpen);
+        const currentConfig = serverConfigurations[configModalOpen];
+        console.log('[MCP Connection] Opening config modal for server:', configModalOpen);
+        console.log('[MCP Connection] Server found:', !!server);
+        console.log('[MCP Connection] Current config:', currentConfig);
+        console.log('[MCP Connection] All configurations:', serverConfigurations);
+        console.log('[MCP Connection] Expected config key exists?', configModalOpen in serverConfigurations);
+        
         return server ? (
           <McpServerConfigModal
             isOpen={!!configModalOpen}
-            onClose={() => setConfigModalOpen(null)}
+            onClose={() => {
+              console.log('[MCP Connection] Modal onClose called - closing modal');
+              setConfigModalOpen(null);
+            }}
             server={{
               id: server.id,
               name: server.name,
@@ -719,7 +749,7 @@ export default function MCPServerConfig({
               status: server.status as 'connected' | 'disconnected' | 'error'
             }}
             onSave={handleConfigurationSave}
-            currentConfig={serverConfigurations[configModalOpen]}
+            currentConfig={currentConfig}
           />
         ) : null;
       })()}

@@ -47,10 +47,10 @@ const llmProviders = [
   {
     value: 'azure-openai',
     label: 'Azure OpenAI',
-    models: ['gpt-4o', 'gpt-4', 'gpt-4-turbo', 'gpt-35-turbo'],
+    models: ['your-deployment-name'],
     defaultEndpoint: 'https://your-resource.openai.azure.com',
     requiresKey: true,
-    description: 'Microsoft Azure OpenAI Service with enterprise security'
+    description: 'Microsoft Azure OpenAI Service with enterprise security (enter your deployment name below)'
   },
   {
     value: 'openai',
@@ -162,7 +162,7 @@ export default function AddLlmConfigModal({
         ...prev,
         provider: providerId,
         endpoint: provider.defaultEndpoint,
-        model: provider.models[0],
+        model: providerId === 'azure-openai' ? '' : provider.models[0], // Clear model for Azure OpenAI
         apiKey: provider.requiresKey ? prev.apiKey : ''
       }));
     }
@@ -206,66 +206,119 @@ export default function AddLlmConfigModal({
 
     setIsTesting(true);
     setTestResult(null);
-    setMessage({ type: 'info', text: `Testing ${formData.provider} configuration...` });
+    setMessage({ type: 'info', text: `Testing ${formData.provider} connection...` });
 
     try {
-      // Validate configuration format (browser can't test LLM APIs directly due to CORS)
-      
-      // Validate endpoint URL format
-      let isValidEndpoint = false;
-      if (formData.provider === 'azure-openai') {
-        // Azure OpenAI should contain azure.com and openai
-        isValidEndpoint = formData.endpoint.includes('azure.com') && formData.endpoint.includes('openai');
-        if (!isValidEndpoint) {
-          throw new Error('Azure OpenAI endpoint should contain "azure.com" and "openai"');
-        }
-      } else if (formData.provider === 'anthropic') {
-        // Anthropic should use api.anthropic.com
-        isValidEndpoint = formData.endpoint.includes('api.anthropic.com');
-        if (!isValidEndpoint) {
-          throw new Error('Anthropic endpoint should be "https://api.anthropic.com/v1/messages"');
-        }
-      } else if (formData.provider === 'openai') {
-        // OpenAI should use api.openai.com
-        isValidEndpoint = formData.endpoint.includes('api.openai.com');
-        if (!isValidEndpoint) {
-          throw new Error('OpenAI endpoint should contain "api.openai.com"');
-        }
-      } else {
-        // Custom endpoint - just check it's a valid URL
-        isValidEndpoint = true;
-      }
-
-      // Validate API key format
-      if (selectedProvider?.requiresKey && formData.apiKey) {
-        if (formData.provider === 'azure-openai' && formData.apiKey.length < 20) {
-          throw new Error('Azure OpenAI API key appears to be invalid (too short)');
-        }
-        if (formData.provider === 'anthropic' && !formData.apiKey.startsWith('sk-ant-')) {
-          throw new Error('Anthropic API key should start with "sk-ant-"');
-        }
-        if (formData.provider === 'openai' && !formData.apiKey.startsWith('sk-')) {
-          throw new Error('OpenAI API key should start with "sk-"');
-        }
-      }
-
-      // Simulate a brief validation delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Test the actual LLM endpoint
+      await testLLMConnection();
 
       setTestResult({ 
         success: true, 
-        message: `Configuration validated for ${selectedProvider?.label}` 
+        message: `Connection successful! Endpoint and deployment verified.` 
       });
       setMessage({ 
         type: 'success', 
-        text: 'Configuration format is valid - will be tested when used by agents' 
+        text: 'Connection test passed - configuration is working correctly' 
       });
     } catch (error: any) {
       setTestResult({ success: false, message: error.message });
-      setMessage({ type: 'error', text: `Validation failed: ${error.message}` });
+      setMessage({ type: 'error', text: `Connection failed: ${error.message}` });
     } finally {
       setIsTesting(false);
     }
+  };
+
+  const testLLMConnection = async () => {
+    let endpoint = formData.endpoint;
+    if (!endpoint.startsWith('https://')) endpoint = 'https://' + endpoint;
+    if (endpoint.endsWith('/')) endpoint = endpoint.slice(0, -1);
+
+    let apiUrl: string;
+    let headers: Record<string, string>;
+    let requestBody: any;
+
+    if (formData.provider === 'azure-openai') {
+      // Test Azure OpenAI with a minimal request
+      const deploymentName = formData.model;
+      apiUrl = `${endpoint}/openai/deployments/${deploymentName}/chat/completions?api-version=2024-08-01-preview`;
+      headers = {
+        'Content-Type': 'application/json',
+        'api-key': formData.apiKey
+      };
+      requestBody = {
+        messages: [{ role: 'user', content: 'test' }],
+        max_tokens: 1,
+        temperature: 0
+      };
+      
+      console.log(`[LLM Test] Testing Azure OpenAI: ${apiUrl}`);
+      
+    } else if (formData.provider === 'openai') {
+      // Test OpenAI
+      apiUrl = `${endpoint}/chat/completions`;
+      headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${formData.apiKey}`
+      };
+      requestBody = {
+        model: formData.model,
+        messages: [{ role: 'user', content: 'test' }],
+        max_tokens: 1,
+        temperature: 0
+      };
+      
+    } else if (formData.provider === 'anthropic') {
+      // Test Anthropic
+      apiUrl = `${endpoint}/v1/messages`;
+      headers = {
+        'Content-Type': 'application/json',
+        'x-api-key': formData.apiKey,
+        'anthropic-version': '2023-06-01'
+      };
+      requestBody = {
+        model: formData.model,
+        messages: [{ role: 'user', content: 'test' }],
+        max_tokens: 1
+      };
+      
+    } else {
+      throw new Error('Provider testing not yet implemented for custom endpoints');
+    }
+
+    // Add custom headers if any
+    if (formData.customHeaders) {
+      Object.assign(headers, formData.customHeaders);
+    }
+
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      console.error(`[LLM Test] API error:`, {
+        status: response.status,
+        statusText: response.statusText,
+        url: apiUrl,
+        errorText
+      });
+      
+      if (formData.provider === 'azure-openai' && response.status === 404) {
+        throw new Error(`Deployment '${formData.model}' not found. Check your deployment name in Azure AI Studio.`);
+      } else if (response.status === 401) {
+        throw new Error('Authentication failed. Check your API key.');
+      } else if (response.status === 403) {
+        throw new Error('Access forbidden. Check your API key permissions.');
+      } else {
+        throw new Error(`API error: ${response.status} - ${response.statusText}`);
+      }
+    }
+
+    // Try to parse response to verify it's working
+    const data = await response.json();
+    console.log(`[LLM Test] Success:`, { status: response.status, hasChoices: !!data.choices || !!data.content });
   };
 
   const handleSave = async () => {
@@ -280,7 +333,7 @@ export default function AddLlmConfigModal({
 
     try {
       const llmConfig: NewLlmConfig = {
-        id: editMode ? initialConfig!.id : `llm-${Date.now()}`,
+        id: editMode ? initialConfig!.id : `llm-${crypto.randomUUID()}`,
         name: formData.name.trim(),
         description: formData.description.trim() || `${selectedProvider?.label} configuration: ${formData.model}`,
         provider: formData.provider,
@@ -450,15 +503,19 @@ export default function AddLlmConfigModal({
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <Label htmlFor="model" className="text-sm font-medium text-gray-700">
-                    Model *
+                    {formData.provider === 'azure-openai' ? 'Deployment Name *' : 'Model *'}
                   </Label>
-                  {formData.provider === 'custom' ? (
+                  {formData.provider === 'custom' || formData.provider === 'azure-openai' ? (
                     <Input
                       id="model"
                       type="text"
                       value={formData.model}
                       onChange={(e) => handleInputChange('model', e.target.value)}
-                      placeholder="e.g., llama-2-70b, mistral-7b-instruct"
+                      placeholder={
+                        formData.provider === 'azure-openai' 
+                          ? "e.g., my-gpt4-deployment, gpt-35-turbo-prod" 
+                          : "e.g., llama-2-70b, mistral-7b-instruct"
+                      }
                       disabled={isSaving}
                       className="h-11 font-mono text-sm"
                     />
@@ -475,7 +532,12 @@ export default function AddLlmConfigModal({
                       ))}
                     </select>
                   )}
-                  <p className="text-xs text-gray-500">Select the specific model variant to use</p>
+                  <p className="text-xs text-gray-500">
+                    {formData.provider === 'azure-openai' 
+                      ? 'Enter your Azure OpenAI deployment name (not the model name)'
+                      : 'Select the specific model variant to use'
+                    }
+                  </p>
                 </div>
 
                 <div className="space-y-2">

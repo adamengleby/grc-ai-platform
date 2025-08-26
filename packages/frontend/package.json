@@ -33,6 +33,7 @@
     "rehype-raw": "^7.0.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
+    "socket.io-client": "^4.8.1",
     "tailwind-merge": "^2.2.0",
     "zustand": "^4.4.1"
   },

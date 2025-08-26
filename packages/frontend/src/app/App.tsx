@@ -3,12 +3,10 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from '@/app/store/auth';
 import { DashboardLayout } from '@/app/components/layout/DashboardLayout';
 import { LoginPage } from '@/features/auth/components/LoginPage';
-import { DashboardPage } from '@/features/dashboard/pages/DashboardPage';
 import { AgentsPage } from '@/features/agents/pages/AgentsPage';
-import { ChatPage } from '@/features/chat/pages/ChatPage';
 import { AuditPage } from '@/features/audit/pages/AuditPage';
 import { UsersPage } from '@/features/users/pages/UsersPage';
-import { AIInsightsPage } from '@/features/analytics/pages/AIInsightsPage';
+import { AnalyticsPage } from '@/features/analytics/pages/AnalyticsPage';
 import { ToolsPage } from '@/features/tools/pages/ToolsPage';
 import { ConnectionsPage } from '@/features/connections/pages/ConnectionsPage';
 import SettingsPage from '@/features/settings/pages/SettingsPage';
@@ -41,14 +39,12 @@ function App() {
         
         {/* Protected routes - wrapped in DashboardLayout */}
         <Route path="/" element={<DashboardLayout />}>
-          <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="dashboard" element={<DashboardPage />} />
+          <Route index element={<Navigate to="/analytics" replace />} />
           <Route path="agents" element={<AgentsPage />} />
           <Route path="mcp-servers" element={<Navigate to="/settings?tab=mcp-servers" replace />} />
-          <Route path="chat" element={<ChatPage />} />
           <Route path="audit" element={<AuditPage />} />
           <Route path="users" element={<UsersPage />} />
-          <Route path="ai-insights" element={<AIInsightsPage />} />
+          <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="tools" element={<ToolsPage />} />
           <Route path="connections" element={<ConnectionsPage />} />
           <Route path="llm-config" element={<Navigate to="/settings?tab=llm" replace />} />
@@ -56,7 +52,7 @@ function App() {
         </Route>
         
         {/* Catch all route */}
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/analytics" replace />} />
       </Routes>
     </div>
   );

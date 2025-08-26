@@ -245,17 +245,20 @@ export class PrivacyProtector {
     const stringValue = String(value);
     const length = stringValue.length;
 
+    // Handle empty strings
+    if (length === 0) return '[EMPTY]';
+
     switch (this.config.maskingLevel) {
       case 'light':
         // Show first and last character, mask middle
         if (length <= 2) return '*'.repeat(length);
-        if (length <= 4) return stringValue[0] + '*'.repeat(length - 2) + stringValue[length - 1];
+        if (length <= 4) return stringValue[0] + '*'.repeat(Math.max(length - 2, 0)) + stringValue[length - 1];
         return stringValue.substring(0, 2) + '*'.repeat(Math.max(length - 4, 1)) + stringValue.substring(length - 2);
 
       case 'moderate':
         // Show first character only for shorter strings, partial for longer
-        if (length <= 4) return stringValue[0] + '*'.repeat(length - 1);
-        if (length <= 10) return stringValue.substring(0, 2) + '*'.repeat(length - 2);
+        if (length <= 4) return stringValue[0] + '*'.repeat(Math.max(length - 1, 0));
+        if (length <= 10) return stringValue.substring(0, 2) + '*'.repeat(Math.max(length - 2, 0));
         return stringValue.substring(0, 3) + '*'.repeat(Math.max(length - 6, 1)) + stringValue.substring(length - 3);
 
       case 'strict':

@@ -13,6 +13,7 @@ import { createAgentService } from '@/lib/agentService';
 import AgentStatsCards from '@/features/agents/components/AgentStatsCards';
 import AgentCard from '@/features/agents/components/AgentCard';
 import AgentConfigModal from '@/features/agents/components/AgentConfigModal';
+import { AgentChatModal } from '@/features/agents/components/AgentChatModal';
 
 export const AgentsPage: React.FC = () => {
   const { tenant } = useAuthStore();
@@ -22,6 +23,8 @@ export const AgentsPage: React.FC = () => {
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<AIAgent | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [chatModalOpen, setChatModalOpen] = useState(false);
+  const [chatAgent, setChatAgent] = useState<AIAgent | null>(null);
 
   // Load agents on component mount
   useEffect(() => {
@@ -68,10 +71,20 @@ export const AgentsPage: React.FC = () => {
     setShowCreateModal(true);
   };
 
+  const handleChatWithAgent = (agent: AIAgent) => {
+    setChatAgent(agent);
+    setChatModalOpen(true);
+  };
+
   const handleModalClose = () => {
     setConfigModalOpen(false);
     setShowCreateModal(false);
     setEditingAgent(null);
+  };
+
+  const handleChatModalClose = () => {
+    setChatModalOpen(false);
+    setChatAgent(null);
   };
 
   const handleModalSave = () => {
@@ -156,6 +169,7 @@ export const AgentsPage: React.FC = () => {
               tenantId={tenant?.id || ''}
               onToggle={handleToggleAgent}
               onConfigure={handleConfigureAgent}
+              onChat={handleChatWithAgent}
             />
           ))}
         </div>
@@ -191,6 +205,15 @@ export const AgentsPage: React.FC = () => {
         tenantId={tenant?.id || ''}
         onSave={handleModalSave}
       />
+
+      {/* Agent Chat Modal */}
+      {chatAgent && (
+        <AgentChatModal
+          isOpen={chatModalOpen}
+          onClose={handleChatModalClose}
+          agent={chatAgent}
+        />
+      )}
     </div>
   );
 };

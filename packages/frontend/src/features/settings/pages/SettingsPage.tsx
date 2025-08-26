@@ -58,7 +58,7 @@ const getDefaultMCPPrivacyConfig = (tenantId: string): MCPPrivacyConfig => ({
   customSensitiveFields: [],
   enabledMcpServers: [],
   mcpServerEndpoints: {
-    'archer-grc': 'http://localhost:3001',
+    'archer-grc': 'http://localhost:3005',
   },
   mcpToolAllowlist: {},
   pageSize: 50,
