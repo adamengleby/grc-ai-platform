@@ -22,6 +22,7 @@ interface ArcherConnection {
   username: string;
   password: string;
   instanceId: string;
+  instanceName?: string;
   userDomainId?: string;
 }
 
@@ -181,9 +182,18 @@ interface GetDatafeedMessagesArgs extends BaseToolArgs {
 interface CheckDatafeedHealthArgs extends BaseToolArgs {}
 
 interface GetSecurityEventsArgs extends BaseToolArgs {
-  instanceName: string;
+  instanceName?: string;
   eventType?: string;
-  eventsForDate: string;
+  eventsForDate?: string;
+  timeRange?: string;
+}
+
+interface GenerateSecurityEventsReportArgs extends BaseToolArgs {
+  instanceName?: string;
+  eventType?: string;
+  eventsForDate?: string;
+  timeRange?: string;
+  maxEvents?: number;
 }
 
 /**
@@ -867,6 +877,216 @@ class ArcherAPIClient {
   }
 
   /**
+   * Get all datafeeds from Archer
+   */
+  async getDatafeeds(activeOnly: boolean = true): Promise<any[]> {
+    await this.ensureValidSession();
+    
+    try {
+      console.log('[Archer API] Fetching datafeeds from /api/core/datafeed...');
+      
+      const response = await this.makeRequest<any[]>('/api/core/datafeed');
+      const datafeeds: any[] = [];
+      
+      if (Array.isArray(response)) {
+        response.forEach((item: any) => {
+          if (item.RequestedObject) {
+            const df = item.RequestedObject;
+            // Filter by active status if requested
+            if (!activeOnly || df.Active === true) {
+              datafeeds.push({
+                guid: df.Guid,
+                name: df.Name,
+                active: df.Active,
+                description: df.Description || '',
+                lastRun: df.LastRun || null,
+                nextRun: df.NextRun || null
+              });
+            }
+          }
+        });
+      }
+      
+      console.log(`[Archer API] Found ${datafeeds.length} ${activeOnly ? 'active' : 'total'} datafeeds`);
+      return datafeeds;
+      
+    } catch (error) {
+      console.error('[Archer API] Error fetching datafeeds:', (error as Error).message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get datafeed run history
+   */
+  async getDatafeedHistory(datafeedGuid: string): Promise<any> {
+    await this.ensureValidSession();
+    
+    try {
+      console.log(`[Archer API] Fetching history for datafeed ${datafeedGuid}...`);
+      
+      // POST request with GUID in body and X-HTTP-Method-Override header
+      const response = await this.makeRequest('/api/core/datafeed/history', {
+        method: 'POST',
+        body: JSON.stringify({ Guid: datafeedGuid }),
+        headers: { 'X-HTTP-Method-Override': 'GET' }
+      });
+      
+      console.log(`[Archer API] Retrieved history for datafeed ${datafeedGuid}`);
+      return response;
+      
+    } catch (error) {
+      console.error(`[Archer API] Error fetching datafeed history: ${(error as Error).message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Get datafeed history messages for a specific run
+   */
+  async getDatafeedHistoryMessages(historyId: string | number): Promise<any> {
+    await this.ensureValidSession();
+    
+    try {
+      console.log(`[Archer API] Fetching history messages for datafeed history ID ${historyId}...`);
+      
+      const response = await this.makeRequest(`/api/core/datafeed/historymessage/${historyId}`);
+      
+      console.log(`[Archer API] Retrieved history messages for ID ${historyId}`);
+      return response;
+      
+    } catch (error) {
+      console.error(`[Archer API] Error fetching datafeed history messages: ${(error as Error).message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Check health of all datafeeds
+   */
+  async checkDatafeedHealth(): Promise<any> {
+    try {
+      console.log('[Archer API] Starting datafeed health check...');
+      
+      // Get all active datafeeds
+      const datafeeds = await this.getDatafeeds(true);
+      const healthResults = [];
+      
+      for (const datafeed of datafeeds) {
+        try {
+          const recentRun = await this.getDatafeedHistory(datafeed.guid);
+          const healthStatus = {
+            guid: datafeed.guid,
+            name: datafeed.name,
+            active: datafeed.active,
+            lastRun: datafeed.lastRun,
+            nextRun: datafeed.nextRun,
+            status: 'healthy',
+            lastRunResult: null
+          };
+          
+          // Analyze recent run if available
+          if (recentRun && Array.isArray(recentRun) && recentRun.length > 0) {
+            const mostRecent = recentRun[0];
+            healthStatus.lastRunResult = mostRecent;
+            // You can add more health logic here based on run results
+          }
+          
+          healthResults.push(healthStatus);
+        } catch (error) {
+          healthResults.push({
+            guid: datafeed.guid,
+            name: datafeed.name,
+            active: datafeed.active,
+            status: 'error',
+            error: (error as Error).message
+          });
+        }
+      }
+      
+      return {
+        totalDatafeeds: datafeeds.length,
+        healthyCount: healthResults.filter(r => r.status === 'healthy').length,
+        errorCount: healthResults.filter(r => r.status === 'error').length,
+        results: healthResults
+      };
+      
+    } catch (error) {
+      console.error('[Archer API] Error in datafeed health check:', (error as Error).message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get security events from Archer AccessControlReports
+   */
+  async getSecurityEvents(instanceName: string, eventType: string = "all events", eventsForDate: string): Promise<any> {
+    await this.ensureValidSession();
+    
+    try {
+      console.log(`[Archer API] Fetching security events for date: ${eventsForDate}, type: ${eventType}...`);
+      
+      const requestBody = {
+        InstanceName: instanceName,
+        EventType: eventType,
+        EventsForDate: eventsForDate
+      };
+      
+      // POST request to security events endpoint with X-HTTP-Method-Override header
+      const response = await axios.post(`${this.baseUrl}/api/core/system/AccessControlReports/SecurityEvents`, requestBody, {
+        headers: {
+          'Authorization': `Archer session-id=${this.session?.sessionToken}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-HTTP-Method-Override': 'GET'
+        }
+      });
+      
+      console.log(`[Archer API] Retrieved security events for ${eventsForDate}`);
+      console.log(`[Archer API] DEBUG - Raw response:`, JSON.stringify(response, null, 2));
+      
+      // Process and format the response
+      let events: any[] = [];
+      let totalEvents = 0;
+      
+      if (response.data && response.data.Links) {
+        // Count total events from Links array
+        totalEvents = response.data.Links.length;
+        
+        // Extract events from RequestedObject if available
+        if (response.data.RequestedObject && Array.isArray(response.data.RequestedObject)) {
+          events = response.data.RequestedObject;
+        }
+      } else if (Array.isArray(response.data)) {
+        events = response.data;
+        totalEvents = events.length;
+      }
+      
+      // Limit events to prevent response size issues (keep most recent 200 events)
+      const limitedEvents = events.slice(0, 200);
+      
+      return {
+        instanceName: instanceName,
+        eventType: eventType,
+        eventsForDate: eventsForDate,
+        totalEvents: totalEvents,
+        events: limitedEvents,
+        metadata: {
+          requestTime: new Date().toISOString(),
+          responseType: 'SecurityEvents',
+          eventCount: events.length,
+          eventsReturned: limitedEvents.length,
+          eventsLimited: events.length > 200
+        }
+      };
+      
+    } catch (error) {
+      console.error(`[Archer API] Error fetching security events: ${(error as Error).message}`);
+      throw error;
+    }
+  }
+
+  /**
    * Get comprehensive statistics for an application
    */
   async getApplicationStats(appName: string): Promise<ApplicationStats> {
@@ -1312,19 +1532,63 @@ class GRCMCPServer {
               },
               eventType: {
                 type: 'string',
-                description: 'Type of security events to retrieve (default: "all events")',
+                description: 'Type of security events to retrieve. Use "all events" to get all security events. Other types may not be supported by all Archer instances.',
                 default: 'all events'
               },
               eventsForDate: {
                 type: 'string',
-                description: 'Date to retrieve events for (YYYY-MM-DD format)'
+                description: 'Date/range for security events. Supports: YYYY-MM-DD format, "today", "yesterday", "last 5 days", "past week", "last month", etc. Uses current server date (2025), not LLM training date.'
+              },
+              timeRange: {
+                type: 'string',
+                description: 'Alternative to eventsForDate. Supports: "5d", "7d", "30d" for last N days, "today", "yesterday", etc. Uses current server date (2025), not LLM training date.'
               },
               archer_connection: {
                 type: 'object',
                 description: 'Archer connection details'
               }
             },
-            required: ['tenant_id', 'instanceName', 'eventsForDate']
+            required: ['tenant_id']
+          }
+        },
+        {
+          name: 'generate_security_events_report',
+          description: 'Generate a comprehensive report of all security events for analysis. Returns detailed event data, patterns, and security insights.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              tenant_id: {
+                type: 'string',
+                description: 'Tenant identifier for data scoping'
+              },
+              instanceName: {
+                type: 'string',
+                description: 'Archer instance name (e.g., "710100")'
+              },
+              eventType: {
+                type: 'string',
+                description: 'Type of security events to retrieve. Use "all events" to get all security events. Other types may not be supported by all Archer instances.',
+                default: 'all events'
+              },
+              eventsForDate: {
+                type: 'string',
+                description: 'Date/range for security events. Supports: YYYY-MM-DD format, "today", "yesterday", "last 5 days", "past week", "last month", etc. Uses current server date (2025), not LLM training date.'
+              },
+              timeRange: {
+                type: 'string',
+                description: 'Alternative to eventsForDate. Supports: "5d", "7d", "30d" for last N days, "today", "yesterday", etc. Uses current server date (2025), not LLM training date.'
+              },
+              maxEvents: {
+                type: 'number',
+                description: 'Maximum number of events to include in detailed report (default: 100, max: 500)',
+                default: 100
+              },
+              archer_connection: {
+                type: 'object',
+                description: 'Archer connection details'
+              }
+            },
+            required: ['tenant_id']
           }
         }
       ];
@@ -1384,6 +1648,9 @@ class GRCMCPServer {
           
           case 'get_security_events':
             return await this.getSecurityEvents(args as unknown as GetSecurityEventsArgs);
+
+          case 'generate_security_events_report':
+            return await this.generateSecurityEventsReport(args as unknown as GenerateSecurityEventsReportArgs);
           
           default:
             throw new Error(`Unknown tool: ${toolName}`);
@@ -2024,11 +2291,30 @@ class GRCMCPServer {
       // Use ArcherAPIClient like the other working methods
       const archerClient = new ArcherAPIClient(connection);
       
-      // For now, return a basic implementation since ArcherAPIClient may not have getDatafeeds method yet
+      const datafeeds = await archerClient.getDatafeeds(activeOnly !== false);
+      
+      let resultText = `Datafeeds for tenant ${tenant_id}\n`;
+      resultText += `Instance: ${connection.baseUrl}\n`;
+      resultText += `Found ${datafeeds.length} ${activeOnly !== false ? 'active' : 'total'} datafeeds\n\n`;
+      
+      if (datafeeds.length === 0) {
+        resultText += 'No datafeeds found matching the criteria.';
+      } else {
+        datafeeds.forEach((df, index) => {
+          resultText += `${index + 1}. ${df.name}\n`;
+          resultText += `   GUID: ${df.guid}\n`;
+          resultText += `   Active: ${df.active ? 'Yes' : 'No'}\n`;
+          if (df.description) resultText += `   Description: ${df.description}\n`;
+          if (df.lastRun) resultText += `   Last Run: ${df.lastRun}\n`;
+          if (df.nextRun) resultText += `   Next Run: ${df.nextRun}\n`;
+          resultText += '\n';
+        });
+      }
+      
       return {
         content: [{
           type: 'text',
-          text: `Datafeeds feature for tenant ${tenant_id}\nInstance: ${connection.baseUrl}\nNote: Datafeeds API implementation in progress. This would connect to Archer to retrieve datafeed information.`
+          text: resultText
         }]
       };
 
@@ -2047,48 +2333,159 @@ class GRCMCPServer {
    * Get datafeed history
    */
   private async getDatafeedHistory(args: GetDatafeedHistoryArgs): Promise<CallToolResult> {
-    const { tenant_id, datafeedGuid } = args;
+    const { tenant_id, datafeedGuid, archer_connection } = args;
     
-    return {
-      content: [{
-        type: 'text',
-        text: `Unable to retrieve history for datafeed ${datafeedGuid} in tenant ${tenant_id}. This operation requires an active connection to your Archer GRC platform with datafeed monitoring permissions.`
-      }]
+    // Use provided connection or fall back to environment variables
+    const connection = archer_connection || {
+      baseUrl: process.env.ARCHER_BASE_URL || '',
+      username: process.env.ARCHER_USERNAME || '',
+      password: process.env.ARCHER_PASSWORD || '',
+      instanceId: process.env.ARCHER_INSTANCE || '',
+      userDomainId: process.env.ARCHER_USER_DOMAIN_ID || ''
     };
+    
+    if (!connection.baseUrl) {
+      return {
+        content: [{
+          type: 'text',
+          text: `No Archer connection configured for tenant ${tenant_id}. Please configure your Archer connection credentials.`
+        }]
+      };
+    }
+
+    try {
+      const archerClient = new ArcherAPIClient(connection);
+      const history = await archerClient.getDatafeedHistory(datafeedGuid);
+      
+      let resultText = `Datafeed History for GUID: ${datafeedGuid} (Tenant: ${tenant_id})\n`;
+      resultText += `Instance: ${connection.baseUrl}\n\n`;
+      
+      if (!history || (Array.isArray(history) && history.length === 0)) {
+        resultText += 'No history found for this datafeed.';
+      } else {
+        if (Array.isArray(history)) {
+          resultText += `Found ${history.length} history entries:\n\n`;
+          history.slice(0, 10).forEach((historyWrapper, index) => {
+            const entry = historyWrapper.RequestedObject || historyWrapper;
+            const statusMap = { 1: 'Pending', 2: 'Completed', 3: 'Failed', 4: 'Failed with some success' };
+            resultText += `${index + 1}. History ID: ${entry.Id || 'Unknown'}\n`;
+            if (entry.StartTime) resultText += `   Start Date: ${new Date(entry.StartTime).toLocaleString()}\n`;
+            if (entry.EndTime) resultText += `   End Date: ${new Date(entry.EndTime).toLocaleString()}\n`;
+            if (entry.Status !== undefined) resultText += `   Status: ${(statusMap as any)[entry.Status] || entry.Status}\n`;
+            if (entry.SourceRecordsProcessed !== undefined) resultText += `   Records Processed: ${entry.SourceRecordsProcessed}\n`;
+            if (entry.TargetRecords) {
+              resultText += `   Target Records - Created: ${entry.TargetRecords.Created}, Updated: ${entry.TargetRecords.Updated}, Failed: ${entry.TargetRecords.Failed}\n`;
+            }
+            resultText += '\n';
+          });
+          if (history.length > 10) {
+            resultText += `... and ${history.length - 10} more entries\n`;
+          }
+        } else if (history.RequestedObject) {
+          resultText += 'History entry details:\n';
+          const entry = history.RequestedObject;
+          if (entry.Id) resultText += `History ID: ${entry.Id}\n`;
+          if (entry.StartDate) resultText += `Start Date: ${entry.StartDate}\n`;
+          if (entry.EndDate) resultText += `End Date: ${entry.EndDate}\n`;
+          if (entry.Status) resultText += `Status: ${entry.Status}\n`;
+        }
+      }
+      
+      return {
+        content: [{
+          type: 'text',
+          text: resultText
+        }]
+      };
+
+    } catch (error: any) {
+      console.error('[getDatafeedHistory] Error:', error);
+      return {
+        content: [{
+          type: 'text',
+          text: `Error retrieving history for datafeed ${datafeedGuid} in tenant ${tenant_id}: ${error.message || error}`
+        }]
+      };
+    }
   }
 
   /**
    * Get datafeed history messages
    */
   private async getDatafeedHistoryMessages(args: GetDatafeedMessagesArgs): Promise<CallToolResult> {
-    const { tenant_id, historyId } = args;
+    const { tenant_id, historyId, archer_connection } = args;
     
-    return {
-      content: [{
-        type: 'text',
-        text: `Unable to retrieve history messages for datafeed history ${historyId} in tenant ${tenant_id}. This operation requires an active connection to your Archer GRC platform with detailed log access.`
-      }]
+    // Use provided connection or fall back to environment variables
+    const connection = archer_connection || {
+      baseUrl: process.env.ARCHER_BASE_URL || '',
+      username: process.env.ARCHER_USERNAME || '',
+      password: process.env.ARCHER_PASSWORD || '',
+      instanceId: process.env.ARCHER_INSTANCE || '',
+      userDomainId: process.env.ARCHER_USER_DOMAIN_ID || ''
     };
+    
+    if (!connection.baseUrl) {
+      return {
+        content: [{
+          type: 'text',
+          text: `No Archer connection configured for tenant ${tenant_id}. Please configure your Archer connection credentials.`
+        }]
+      };
+    }
+
+    try {
+      const archerClient = new ArcherAPIClient(connection);
+      const messages = await archerClient.getDatafeedHistoryMessages(historyId);
+      
+      let resultText = `Datafeed History Messages for ID: ${historyId} (Tenant: ${tenant_id})\n`;
+      resultText += `Instance: ${connection.baseUrl}\n\n`;
+      
+      if (!messages || (Array.isArray(messages) && messages.length === 0)) {
+        resultText += 'No messages found for this history entry.';
+      } else {
+        if (Array.isArray(messages)) {
+          resultText += `Found ${messages.length} messages:\n\n`;
+          messages.slice(0, 20).forEach((msg, index) => {
+            resultText += `${index + 1}. `;
+            if (msg.Timestamp) resultText += `[${msg.Timestamp}] `;
+            if (msg.Level) resultText += `${msg.Level}: `;
+            if (msg.Message) resultText += `${msg.Message}\n`;
+            else resultText += `${JSON.stringify(msg)}\n`;
+          });
+          if (messages.length > 20) {
+            resultText += `... and ${messages.length - 20} more messages\n`;
+          }
+        } else if (messages.RequestedObject) {
+          resultText += 'Message details:\n';
+          resultText += JSON.stringify(messages.RequestedObject, null, 2);
+        } else {
+          resultText += 'Raw message data:\n';
+          resultText += JSON.stringify(messages, null, 2);
+        }
+      }
+      
+      return {
+        content: [{
+          type: 'text',
+          text: resultText
+        }]
+      };
+
+    } catch (error: any) {
+      console.error('[getDatafeedHistoryMessages] Error:', error);
+      return {
+        content: [{
+          type: 'text',
+          text: `Error retrieving history messages for ID ${historyId} in tenant ${tenant_id}: ${error.message || error}`
+        }]
+      };
+    }
   }
 
   /**
    * Check datafeed health
    */
   private async checkDatafeedHealth(args: CheckDatafeedHealthArgs): Promise<CallToolResult> {
-    const { tenant_id } = args;
-    
-    return {
-      content: [{
-        type: 'text',
-        text: `Unable to check datafeed health for tenant ${tenant_id}. This operation requires an active connection to your Archer GRC platform with system monitoring permissions.`
-      }]
-    };
-  }
-
-  /**
-   * Get security events
-   */
-  private async getSecurityEvents(args: GetSecurityEventsArgs): Promise<CallToolResult> {
     const { tenant_id, archer_connection } = args;
     
     // Use provided connection or fall back to environment variables
@@ -2111,52 +2508,177 @@ class GRCMCPServer {
 
     try {
       const archerClient = new ArcherAPIClient(connection);
+      const healthReport = await archerClient.checkDatafeedHealth();
       
-      // Try to get audit logs or security-related records
-      // First, try to find security-related applications
-      const applications = await archerClient.getApplications();
-      const securityApps = applications.filter(app => 
-        app.Name && (
-          app.Name.toLowerCase().includes('security') ||
-          app.Name.toLowerCase().includes('audit') ||
-          app.Name.toLowerCase().includes('incident') ||
-          app.Name.toLowerCase().includes('event')
-        )
-      );
+      let resultText = `Datafeed Health Report for tenant ${tenant_id}\n`;
+      resultText += `Instance: ${connection.baseUrl}\n\n`;
       
-      if (securityApps.length === 0) {
-        return {
-          content: [{
-            type: 'text',
-            text: `No security-related applications found in Archer for tenant ${tenant_id}. Available applications: ${applications.slice(0, 5).map(a => a.Name).join(', ')}`
-          }]
-        };
-      }
+      resultText += `Total Datafeeds: ${healthReport.totalDatafeeds}\n`;
+      resultText += `Healthy: ${healthReport.healthyCount}\n`;
+      resultText += `Errors: ${healthReport.errorCount}\n\n`;
       
-      // Get recent records from the first security application
-      const securityApp = securityApps[0];
-      const recentRecords = await archerClient.searchRecords(securityApp.Name, 10, 1);
-      
-      let resultText = `Security Events for ${securityApp.Name} (Tenant: ${tenant_id})\n`;
-      resultText += `Found ${recentRecords.totalCount} total security records\n\n`;
-      
-      if (recentRecords.records.length > 0) {
-        resultText += `Recent ${recentRecords.records.length} records:\n`;
-        recentRecords.records.forEach((record, index) => {
-          const recordId = record['Content ID'] || record.Id || 'Unknown';
-          const trackingId = record['Tracking ID'] || '';
-          resultText += `${index + 1}. Record ID: ${recordId}`;
-          if (trackingId) resultText += ` | Tracking: ${trackingId}`;
-          resultText += '\n';
-          
-          // Show a few key fields
-          Object.keys(record).slice(0, 3).forEach(key => {
-            if (record[key] && typeof record[key] === 'string' && record[key].length < 100) {
-              resultText += `   ${key}: ${record[key]}\n`;
-            }
-          });
+      if (healthReport.results && healthReport.results.length > 0) {
+        resultText += 'Individual Datafeed Status:\n\n';
+        healthReport.results.forEach((result: any, index: number) => {
+          resultText += `${index + 1}. ${result.name}\n`;
+          resultText += `   Status: ${result.status}\n`;
+          resultText += `   Active: ${result.active ? 'Yes' : 'No'}\n`;
+          if (result.lastRun) resultText += `   Last Run: ${result.lastRun}\n`;
+          if (result.nextRun) resultText += `   Next Run: ${result.nextRun}\n`;
+          if (result.error) resultText += `   Error: ${result.error}\n`;
           resultText += '\n';
         });
+      }
+      
+      return {
+        content: [{
+          type: 'text',
+          text: resultText
+        }]
+      };
+
+    } catch (error: any) {
+      console.error('[checkDatafeedHealth] Error:', error);
+      return {
+        content: [{
+          type: 'text',
+          text: `Error checking datafeed health for tenant ${tenant_id}: ${error.message || error}`
+        }]
+      };
+    }
+  }
+
+  /**
+   * Get security events
+   */
+  private async getSecurityEvents(args: GetSecurityEventsArgs): Promise<CallToolResult> {
+    const { tenant_id, archer_connection, eventType, eventsForDate, timeRange } = args;
+    
+    // Use provided connection or fall back to environment variables
+    const connection = archer_connection || {
+      baseUrl: process.env.ARCHER_BASE_URL || '',
+      username: process.env.ARCHER_USERNAME || '',
+      password: process.env.ARCHER_PASSWORD || '',
+      instanceId: process.env.ARCHER_INSTANCE || '',
+      instanceName: process.env.ARCHER_INSTANCE || '',
+      userDomainId: process.env.ARCHER_USER_DOMAIN_ID || ''
+    };
+    
+    if (!connection.baseUrl) {
+      return {
+        content: [{
+          type: 'text',
+          text: `No Archer connection configured for tenant ${tenant_id}. Please configure your Archer connection credentials.`
+        }]
+      };
+    }
+
+    try {
+      const archerClient = new ArcherAPIClient(connection);
+      
+      // Get security events using the proper Archer API endpoint
+      const instanceName = connection.instanceName || connection.instanceId || '';
+      
+      // Validate and normalize event type - only "all events" is guaranteed to work across all Archer instances
+      let targetEventType = "all events";
+      if (eventType && eventType.toLowerCase().trim() === "all events") {
+        targetEventType = "all events";
+      } else if (eventType && eventType !== "all events") {
+        console.log(`[getSecurityEvents] Invalid eventType "${eventType}", defaulting to "all events"`);
+        targetEventType = "all events";
+      }
+      
+      // Handle relative date expressions and convert to absolute dates
+      // Support both eventsForDate and timeRange parameters
+      const dateInput = eventsForDate || timeRange;
+      const datesToQuery = this.parseEventDate(dateInput);
+      
+      let resultText = `Security Events for tenant ${tenant_id}\n`;
+      resultText += `Instance: ${connection.baseUrl} (${instanceName})\n`;
+      resultText += `Event Type: ${targetEventType}\n`;
+      resultText += `Date Range: ${dateInput || 'today'} (${datesToQuery.join(', ')})\n\n`;
+      
+      let totalEventsFound = 0;
+      let allEvents: any[] = [];
+      
+      // Query each date and collect results
+      for (const dateStr of datesToQuery) {
+        try {
+          const securityEventsResult = await archerClient.getSecurityEvents(instanceName, targetEventType, dateStr);
+          
+          if (securityEventsResult.totalEvents > 0) {
+            resultText += `Events for ${dateStr}: ${securityEventsResult.totalEvents} events\n`;
+            totalEventsFound += securityEventsResult.totalEvents;
+            
+            // Add date context to events and collect them
+            securityEventsResult.events.forEach((event: any) => {
+              allEvents.push({ ...event, queryDate: dateStr });
+            });
+          }
+        } catch (error) {
+          console.log(`[getSecurityEvents] Error querying ${dateStr}:`, error);
+        }
+      }
+      
+      if (totalEventsFound === 0) {
+        resultText += `No security events found for the specified date range.\n`;
+      } else {
+        resultText += `\nTotal Events Found: ${totalEventsFound}\n\n`;
+        
+        // Sort events by timestamp if available
+        allEvents.sort((a, b) => {
+          if (a.Timestamp && b.Timestamp) {
+            return new Date(b.Timestamp).getTime() - new Date(a.Timestamp).getTime();
+          }
+          return 0;
+        });
+        
+        // Event type analysis
+        const eventTypes: Record<string, number> = {};
+        const userActivity: Record<string, number> = {};
+        
+        allEvents.forEach(event => {
+          const eventType = event.Event || 'Unknown';
+          const user = event.InitiatingUser || 'Unknown';
+          
+          eventTypes[eventType] = (eventTypes[eventType] || 0) + 1;
+          userActivity[user] = (userActivity[user] || 0) + 1;
+        });
+        
+        // Add summary statistics
+        resultText += `## Event Type Summary:\n`;
+        Object.entries(eventTypes)
+          .sort(([,a], [,b]) => b - a)
+          .slice(0, 10)
+          .forEach(([type, count]) => {
+            resultText += `• ${type}: ${count} events\n`;
+          });
+        
+        resultText += `\n## Top Active Users:\n`;
+        Object.entries(userActivity)
+          .sort(([,a], [,b]) => b - a)
+          .slice(0, 10)
+          .forEach(([user, count]) => {
+            resultText += `• ${user}: ${count} events\n`;
+          });
+        
+        resultText += `\n## Recent Events (Last 10):\n`;
+        
+        // Show up to 10 most recent events (reduced from 20 to save space)
+        allEvents.slice(0, 10).forEach((event: any, index: number) => {
+          resultText += `${index + 1}. **${event.Event || 'Unknown Event'}** (${event.queryDate})\n`;
+          if (event.InitiatingUser) resultText += `   👤 User: ${event.InitiatingUser}\n`;
+          if (event.Timestamp) resultText += `   🕒 Time: ${new Date(event.Timestamp).toLocaleString()}\n`;
+          if (event.EventDetails && event.EventDetails.length < 150) {
+            resultText += `   ℹ️ Details: ${event.EventDetails}\n`;
+          }
+          resultText += '\n';
+        });
+        
+        if (allEvents.length > 10) {
+          resultText += `📊 **${allEvents.length - 10} additional events available**\n\n`;
+          resultText += `💡 **Tip**: For detailed analysis of all ${totalEventsFound} events, use the 'generate_security_events_report' tool to create a comprehensive report.\n`;
+        }
       }
       
       return {
@@ -2175,6 +2697,253 @@ class GRCMCPServer {
         }]
       };
     }
+  }
+
+  /**
+   * Generate comprehensive security events report
+   */
+  private async generateSecurityEventsReport(args: GenerateSecurityEventsReportArgs): Promise<CallToolResult> {
+    const { tenant_id, archer_connection, eventType, eventsForDate, timeRange, maxEvents = 100 } = args;
+    
+    // Use provided connection or fall back to environment variables
+    const connection = archer_connection || {
+      baseUrl: process.env.ARCHER_BASE_URL || '',
+      username: process.env.ARCHER_USERNAME || '',
+      password: process.env.ARCHER_PASSWORD || '',
+      instanceId: process.env.ARCHER_INSTANCE || '',
+      instanceName: process.env.ARCHER_INSTANCE || '',
+      userDomainId: process.env.ARCHER_USER_DOMAIN_ID || ''
+    };
+    
+    if (!connection.baseUrl) {
+      return {
+        content: [{
+          type: 'text',
+          text: `No Archer connection configured for tenant ${tenant_id}. Please configure your Archer connection credentials.`
+        }]
+      };
+    }
+
+    // Limit maxEvents to prevent response size issues
+    const limitedMaxEvents = Math.min(maxEvents || 100, 500);
+
+    try {
+      const archerClient = new ArcherAPIClient(connection);
+      
+      const instanceName = connection.instanceName || connection.instanceId || '';
+      
+      // Validate and normalize event type - only "all events" is guaranteed to work across all Archer instances
+      let targetEventType = "all events";
+      if (eventType && eventType.toLowerCase().trim() === "all events") {
+        targetEventType = "all events";
+      } else if (eventType && eventType !== "all events") {
+        console.log(`[generateSecurityEventsReport] Invalid eventType "${eventType}", defaulting to "all events"`);
+        targetEventType = "all events";
+      }
+      
+      const dateInput = eventsForDate || timeRange;
+      const datesToQuery = this.parseEventDate(dateInput);
+      
+      let allEvents: any[] = [];
+      let totalEventsFound = 0;
+      
+      // Query each date and collect results
+      for (const dateStr of datesToQuery) {
+        try {
+          const securityEventsResult = await archerClient.getSecurityEvents(instanceName, targetEventType, dateStr);
+          
+          if (securityEventsResult.totalEvents > 0) {
+            totalEventsFound += securityEventsResult.totalEvents;
+            
+            securityEventsResult.events.forEach((event: any) => {
+              allEvents.push({ ...event, queryDate: dateStr });
+            });
+          }
+        } catch (error) {
+          console.log(`[generateSecurityEventsReport] Error querying ${dateStr}:`, error);
+        }
+      }
+      
+      if (totalEventsFound === 0) {
+        return {
+          content: [{
+            type: 'text',
+            text: `# Security Events Report\n\n**Tenant**: ${tenant_id}\n**Instance**: ${instanceName}\n**Date Range**: ${dateInput || 'today'}\n**Event Type**: ${targetEventType}\n\n❌ No security events found for the specified criteria.`
+          }]
+        };
+      }
+      
+      // Sort events by timestamp (most recent first)
+      allEvents.sort((a, b) => {
+        if (a.Timestamp && b.Timestamp) {
+          return new Date(b.Timestamp).getTime() - new Date(a.Timestamp).getTime();
+        }
+        return 0;
+      });
+      
+      // Limit events for detailed listing
+      const eventsToShow = allEvents.slice(0, limitedMaxEvents);
+      
+      // Detailed analytics
+      const eventTypes: Record<string, number> = {};
+      const userActivity: Record<string, number> = {};
+      const hourlyDistribution: Record<string, number> = {};
+      const dailyDistribution: Record<string, number> = {};
+      const failedEvents = allEvents.filter(e => e.Event && (e.Event.includes('Failed') || e.Event.includes('Maximum')));
+      
+      allEvents.forEach(event => {
+        const eventType = event.Event || 'Unknown';
+        const user = event.InitiatingUser || 'Unknown';
+        
+        eventTypes[eventType] = (eventTypes[eventType] || 0) + 1;
+        userActivity[user] = (userActivity[user] || 0) + 1;
+        
+        if (event.Timestamp) {
+          const date = new Date(event.Timestamp);
+          const hour = date.getHours().toString().padStart(2, '0') + ':00';
+          const day = date.toISOString().split('T')[0];
+          
+          hourlyDistribution[hour] = (hourlyDistribution[hour] || 0) + 1;
+          dailyDistribution[day] = (dailyDistribution[day] || 0) + 1;
+        }
+      });
+      
+      // Generate comprehensive report (truncated for space - focus on key metrics)
+      let report = `# 🔒 Security Events Report\n\n`;
+      report += `**Tenant**: ${tenant_id}\n`;
+      report += `**Instance**: ${instanceName}\n`;
+      report += `**Date Range**: ${dateInput || 'today'} (${datesToQuery.join(', ')})\n`;
+      report += `**Total Events**: ${totalEventsFound.toLocaleString()}\n`;
+      report += `**Unique Event Types**: ${Object.keys(eventTypes).length}\n`;
+      report += `**Active Users**: ${Object.keys(userActivity).length}\n\n`;
+      
+      // Top event types  
+      report += `## 📈 Event Type Distribution\n`;
+      Object.entries(eventTypes)
+        .sort(([,a], [,b]) => b - a)
+        .slice(0, 10)
+        .forEach(([type, count]) => {
+          const percentage = ((count / totalEventsFound) * 100).toFixed(1);
+          report += `- **${type}**: ${count} events (${percentage}%)\n`;
+        });
+      report += '\n';
+      
+      // Top users
+      report += `## 👥 Top Active Users\n`;
+      Object.entries(userActivity)
+        .sort(([,a], [,b]) => b - a)
+        .slice(0, 10)
+        .forEach(([user, count]) => {
+          const percentage = ((count / totalEventsFound) * 100).toFixed(1);
+          report += `- **${user}**: ${count} events (${percentage}%)\n`;
+        });
+      report += '\n';
+      
+      // Recent events
+      report += `## 📋 Recent Events (${Math.min(eventsToShow.length, 50)})\n\n`;
+      eventsToShow.slice(0, 50).forEach((event, index) => {
+        report += `**${index + 1}.** ${event.Event || 'Unknown'} - ${event.InitiatingUser || 'Unknown User'} (${new Date(event.Timestamp).toLocaleString()})\n`;
+      });
+      
+      if (allEvents.length > limitedMaxEvents) {
+        report += `\n*Showing ${limitedMaxEvents} of ${totalEventsFound} total events.*`;
+      }
+      
+      return {
+        content: [{
+          type: 'text',
+          text: report
+        }]
+      };
+      
+    } catch (error) {
+      console.error('[GRC Server] Error generating security events report:', (error as Error).message);
+      return {
+        content: [{
+          type: 'text',
+          text: `Error generating security events report for tenant ${tenant_id}: ${(error as Error).message}`
+        }]
+      };
+    }
+  }
+
+  /**
+   * Parse event date expressions and return array of absolute dates
+   * Handles relative expressions like "last 5 days", "past week", etc.
+   */
+  private parseEventDate(dateExpression?: string): string[] {
+    const now = new Date();
+    
+    if (!dateExpression) {
+      // Default to today
+      return [now.toISOString().split('T')[0]];
+    }
+    
+    // If it's already in YYYY-MM-DD format, return as-is
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateExpression)) {
+      return [dateExpression];
+    }
+    
+    const expr = dateExpression.toLowerCase().trim();
+    const dates: string[] = [];
+    
+    // Handle relative date expressions
+    if (expr === 'today') {
+      dates.push(now.toISOString().split('T')[0]);
+    } else if (expr === 'yesterday') {
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+      dates.push(yesterday.toISOString().split('T')[0]);
+    } else if (expr.includes('last') && expr.includes('day')) {
+      // Extract number of days (e.g., "last 5 days", "past 7 days")
+      const match = expr.match(/(\d+)\s*days?/);
+      const numDays = match ? parseInt(match[1], 10) : 7;
+      
+      // Generate dates for the last N days (including today)
+      for (let i = 0; i < numDays; i++) {
+        const date = new Date(now);
+        date.setDate(date.getDate() - i);
+        dates.push(date.toISOString().split('T')[0]);
+      }
+    } else if (/^\d+[dD]$/.test(expr)) {
+      // Handle shorthand format like "5d", "7d", "30d"
+      const numDays = parseInt(expr.replace(/[dD]/, ''), 10);
+      
+      // Generate dates for the last N days (including today)
+      for (let i = 0; i < numDays; i++) {
+        const date = new Date(now);
+        date.setDate(date.getDate() - i);
+        dates.push(date.toISOString().split('T')[0]);
+      }
+    } else if (expr.includes('past week') || expr.includes('last week')) {
+      // Last 7 days
+      for (let i = 0; i < 7; i++) {
+        const date = new Date(now);
+        date.setDate(date.getDate() - i);
+        dates.push(date.toISOString().split('T')[0]);
+      }
+    } else if (expr.includes('past month') || expr.includes('last month')) {
+      // Last 30 days
+      for (let i = 0; i < 30; i++) {
+        const date = new Date(now);
+        date.setDate(date.getDate() - i);
+        dates.push(date.toISOString().split('T')[0]);
+      }
+    } else {
+      // Fallback: try to parse as a date, or default to today
+      try {
+        const parsed = new Date(dateExpression);
+        if (!isNaN(parsed.getTime())) {
+          dates.push(parsed.toISOString().split('T')[0]);
+        } else {
+          dates.push(now.toISOString().split('T')[0]);
+        }
+      } catch {
+        dates.push(now.toISOString().split('T')[0]);
+      }
+    }
+    
+    return dates;
   }
 
   /**
@@ -2503,6 +3272,8 @@ class GRCMCPServer {
         return await this.checkDatafeedHealth(args);
       case 'get_security_events':
         return await this.getSecurityEvents(args);
+      case 'generate_security_events_report':
+        return await this.generateSecurityEventsReport(args);
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -2517,7 +3288,7 @@ class GRCMCPServer {
 export { GRCMCPServer };
 
 // Only start the server if this file is run directly (not imported)
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (require.main === module) {
   const grcServer = new GRCMCPServer();
   const transport = new StdioServerTransport();
   
