@@ -33,7 +33,7 @@ import {
   credentialsManager,
   type ArcherCredentials,
   type ConnectionTestResult 
-} from '@/lib/credentialsApi';
+} from '@/lib/backendCredentialsApi';
 import { useAuthStore } from '@/app/store/auth';
 
 export interface ArcherConnectionConfigProps {
@@ -219,7 +219,7 @@ export const ArcherConnectionConfig: React.FC<ArcherConnectionConfigProps> = ({
         password: testData.password,
         instanceId: testData.instanceName,
         instanceName: testData.instanceName,
-        userDomainId: testData.userDomain || '1',
+        userDomainId: testData.userDomain || null,
         isDefault: false,
         created: new Date().toISOString(),
         status: 'testing'
@@ -278,7 +278,7 @@ export const ArcherConnectionConfig: React.FC<ArcherConnectionConfigProps> = ({
         password: formData.password,
         instanceId: formData.instanceName, // Keep for backward compatibility
         instanceName: formData.instanceName, // Add the missing field that was causing issues
-        userDomainId: formData.userDomain || '1',
+        userDomainId: formData.userDomain || null,
         isDefault: connections.length === 0, // First connection is default
         created: selectedConnection?.created || new Date().toISOString(),
         status: 'disconnected'

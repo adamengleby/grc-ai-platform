@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { Server } from '@modelcontextprotocol/sdk/server/index';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
   Tool,
   CallToolResult,
   ListToolsResult,
-} from '@modelcontextprotocol/sdk/types.js';
+} from '@modelcontextprotocol/sdk/types';
+import { getAllTools } from '../tools-registry';
 import https from 'https';
 import { URL } from 'url';
 import axios from 'axios';
-import { PrivacyProtector } from '../privacy-protector.js';
+import { PrivacyProtector } from '../privacy-protector';
 
 /**
  * Archer connection configuration interface
@@ -209,6 +210,67 @@ interface RequestOptions {
 }
 
 /**
+ * Singleton Manager for ArcherAPIClient instances
+ * Prevents session destruction by reusing clients across tool calls
+ */
+class ArcherClientManager {
+  private static instance: ArcherClientManager;
+  private clients = new Map<string, ArcherAPIClient>();
+
+  private constructor() {}
+
+  static getInstance(): ArcherClientManager {
+    if (!ArcherClientManager.instance) {
+      ArcherClientManager.instance = new ArcherClientManager();
+    }
+    return ArcherClientManager.instance;
+  }
+
+  /**
+   * Get or create an ArcherAPIClient for the connection
+   * Uses connection signature as key to ensure proper isolation
+   */
+  async getClient(connection: ArcherConnection): Promise<ArcherAPIClient> {
+    const key = this.generateConnectionKey(connection);
+    
+    let client = this.clients.get(key);
+    if (!client) {
+      console.log(`[Archer Client Manager] Creating new client for ${connection.baseUrl}/${connection.instanceId}`);
+      client = new ArcherAPIClient(connection);
+      this.clients.set(key, client);
+    }
+
+    // Ensure client is authenticated (handles session expiry internally)
+    await this.ensureAuthenticated(client);
+    return client;
+  }
+
+  /**
+   * Generate unique key for connection to ensure tenant isolation
+   */
+  private generateConnectionKey(connection: ArcherConnection): string {
+    return `${connection.baseUrl}|${connection.instanceId}|${connection.username}|${connection.userDomainId || 'null'}`;
+  }
+
+  /**
+   * Ensure client is authenticated, re-authenticate if session expired
+   */
+  private async ensureAuthenticated(client: ArcherAPIClient): Promise<void> {
+    if (!client.hasValidSession()) {
+      console.log('[Archer Client Manager] Session expired or missing, re-authenticating...');
+      await client.authenticate();
+    }
+  }
+
+  /**
+   * Clear all cached clients (for testing or memory management)
+   */
+  clearClients(): void {
+    this.clients.clear();
+  }
+}
+
+/**
  * Production Archer GRC Platform API Client
  * Based on the working PoC with multi-tenant support
  */
@@ -238,6 +300,14 @@ class ArcherAPIClient {
       enableTokenization: process.env.ENABLE_TOKENIZATION === 'true',
       preserveStructure: true
     });
+  }
+
+  /**
+   * Check if current session is valid and not expired
+   */
+  hasValidSession(): boolean {
+    if (!this.session) return false;
+    return new Date() < this.session.expiresAt;
   }
 
   /**
@@ -1043,7 +1113,8 @@ class ArcherAPIClient {
       });
       
       console.log(`[Archer API] Retrieved security events for ${eventsForDate}`);
-      console.log(`[Archer API] DEBUG - Raw response:`, JSON.stringify(response, null, 2));
+      console.log(`[Archer API] DEBUG - Response status:`, response.status);
+      console.log(`[Archer API] DEBUG - Response data:`, JSON.stringify(response.data, null, 2));
       
       // Process and format the response
       let events: any[] = [];
@@ -1177,422 +1248,8 @@ class GRCMCPServer {
 
   private setupHandlers(): void {
     this.server.setRequestHandler(ListToolsRequestSchema, async (): Promise<ListToolsResult> => {
-      const tools: Tool[] = [
-        {
-          name: 'get_archer_applications',
-          description: 'List all active Archer applications and questionnaires available for analysis',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              tenant_id: {
-                type: 'string',
-                description: 'Tenant identifier for data scoping'
-              },
-              archer_connection: {
-                type: 'object',
-                description: 'Archer connection details',
-                properties: {
-                  baseUrl: { type: 'string' },
-                  username: { type: 'string' },
-                  password: { type: 'string' },
-                  instanceId: { type: 'string' },
-                  userDomainId: { type: 'string' }
-                }
-              }
-            },
-            required: ['tenant_id']
-          }
-        },
-        {
-          name: 'search_archer_records',
-          description: 'Search and retrieve records from a specific Archer application with privacy protection and field transformation',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              tenant_id: {
-                type: 'string',
-                description: 'Tenant identifier for data scoping'
-              },
-              applicationName: {
-                type: 'string',
-                description: 'Name of the Archer application (e.g., "Risk Register", "Controls", "Incidents")'
-              },
-              pageSize: {
-                type: 'number',
-                description: 'Number of records per page (default: 100, max: 500)',
-                default: 100
-              },
-              pageNumber: {
-                type: 'number',
-                description: 'Page number to retrieve (default: 1)',
-                default: 1
-              },
-              archer_connection: {
-                type: 'object',
-                description: 'Archer connection details'
-              }
-            },
-            required: ['tenant_id', 'applicationName']
-          }
-        },
-        {
-          name: 'get_archer_stats',
-          description: 'Get comprehensive statistics and data quality analysis for an Archer application',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              tenant_id: {
-                type: 'string',
-                description: 'Tenant identifier for data scoping'
-              },
-              applicationName: {
-                type: 'string',
-                description: 'Name of the Archer application to analyze'
-              },
-              archer_connection: {
-                type: 'object',
-                description: 'Archer connection details'
-              }
-            },
-            required: ['tenant_id', 'applicationName']
-          }
-        },
-        {
-          name: 'analyze_grc_data',
-          description: 'AI-powered analysis of GRC data with natural language queries and comprehensive insights',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              tenant_id: {
-                type: 'string',
-                description: 'Tenant identifier for data scoping'
-              },
-              query: {
-                type: 'string',
-                description: 'Natural language question about GRC data'
-              },
-              applicationName: {
-                type: 'string',
-                description: 'Optional: specific application to focus analysis on'
-              },
-              archer_connection: {
-                type: 'object',
-                description: 'Archer connection details'
-              }
-            },
-            required: ['tenant_id', 'query']
-          }
-        },
-        {
-          name: 'generate_insights',
-          description: 'Generate executive insights and recommendations from GRC data analysis',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              tenant_id: {
-                type: 'string',
-                description: 'Tenant identifier for data scoping'
-              },
-              focus_area: {
-                type: 'string',
-                enum: ['risks', 'controls', 'incidents', 'compliance', 'overall'],
-                description: 'Focus area for insight generation'
-              },
-              insight_type: {
-                type: 'string',
-                enum: ['summary', 'recommendations', 'trends', 'alerts'],
-                description: 'Type of insights to generate'
-              },
-              archer_connection: {
-                type: 'object',
-                description: 'Archer connection details'
-              }
-            },
-            required: ['tenant_id', 'focus_area']
-          }
-        },
-        {
-          name: 'test_archer_connection',
-          description: 'Test connection to RSA Archer instance and authenticate',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              tenant_id: {
-                type: 'string',
-                description: 'Tenant identifier for data scoping'
-              },
-              archer_connection: {
-                type: 'object',
-                description: 'Archer connection details'
-              }
-            },
-            required: ['tenant_id']
-          }
-        },
-        {
-          name: 'debug_archer_api',
-          description: 'Debug Archer API responses to see what is actually being returned',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              tenant_id: {
-                type: 'string',
-                description: 'Tenant identifier for data scoping'
-              },
-              endpoint: {
-                type: 'string',
-                description: 'API endpoint to test (e.g., "api/core/system/level" or "contentapi/Risk_Register")',
-                default: 'api/core/system/level'
-              },
-              archer_connection: {
-                type: 'object',
-                description: 'Archer connection details'
-              }
-            },
-            required: ['tenant_id']
-          }
-        },
-        {
-          name: 'get_application_fields',
-          description: 'Get all ACTIVE field information for a specific Archer application',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              tenant_id: {
-                type: 'string',
-                description: 'Tenant identifier for data scoping'
-              },
-              applicationName: {
-                type: 'string',
-                description: 'Name of the Archer application'
-              },
-              archer_connection: {
-                type: 'object',
-                description: 'Archer connection details'
-              }
-            },
-            required: ['tenant_id', 'applicationName']
-          }
-        },
-        {
-          name: 'get_top_records',
-          description: 'Get top N records from an application, optionally sorted by a field',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              tenant_id: {
-                type: 'string',
-                description: 'Tenant identifier for data scoping'
-              },
-              applicationName: {
-                type: 'string',
-                description: 'Name of the Archer application'
-              },
-              topN: {
-                type: 'number',
-                description: 'Number of top records to retrieve (default: 10)',
-                default: 10
-              },
-              sortField: {
-                type: 'string',
-                description: 'Optional field name to sort by'
-              },
-              archer_connection: {
-                type: 'object',
-                description: 'Archer connection details'
-              }
-            },
-            required: ['tenant_id', 'applicationName']
-          }
-        },
-        {
-          name: 'find_record_by_id',
-          description: 'Find a specific record by its ID in an application',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              tenant_id: {
-                type: 'string',
-                description: 'Tenant identifier for data scoping'
-              },
-              applicationName: {
-                type: 'string',
-                description: 'Name of the Archer application'
-              },
-              recordId: {
-                type: ['string', 'number'],
-                description: 'The record ID to search for'
-              },
-              archer_connection: {
-                type: 'object',
-                description: 'Archer connection details'
-              }
-            },
-            required: ['tenant_id', 'applicationName', 'recordId']
-          }
-        },
-        {
-          name: 'get_datafeeds',
-          description: 'Get list of datafeeds from Archer',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              tenant_id: {
-                type: 'string',
-                description: 'Tenant identifier for data scoping'
-              },
-              activeOnly: {
-                type: 'boolean',
-                description: 'Only return active datafeeds (default: true)',
-                default: true
-              },
-              archer_connection: {
-                type: 'object',
-                description: 'Archer connection details'
-              }
-            },
-            required: ['tenant_id']
-          }
-        },
-        {
-          name: 'get_datafeed_history',
-          description: 'Get run history for a specific datafeed',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              tenant_id: {
-                type: 'string',
-                description: 'Tenant identifier for data scoping'
-              },
-              datafeedGuid: {
-                type: 'string',
-                description: 'GUID of the datafeed'
-              },
-              archer_connection: {
-                type: 'object',
-                description: 'Archer connection details'
-              }
-            },
-            required: ['tenant_id', 'datafeedGuid']
-          }
-        },
-        {
-          name: 'get_datafeed_history_messages',
-          description: 'Get detailed messages for a specific datafeed history run',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              tenant_id: {
-                type: 'string',
-                description: 'Tenant identifier for data scoping'
-              },
-              historyId: {
-                type: ['string', 'number'],
-                description: 'History ID from a datafeed run (obtained from get_datafeed_history)'
-              },
-              archer_connection: {
-                type: 'object',
-                description: 'Archer connection details'
-              }
-            },
-            required: ['tenant_id', 'historyId']
-          }
-        },
-        {
-          name: 'check_datafeed_health',
-          description: 'Check health status of all active datafeeds, identifying failures and missed runs',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              tenant_id: {
-                type: 'string',
-                description: 'Tenant identifier for data scoping'
-              },
-              archer_connection: {
-                type: 'object',
-                description: 'Archer connection details'
-              }
-            },
-            required: ['tenant_id']
-          }
-        },
-        {
-          name: 'get_security_events',
-          description: 'Get security events from Archer for a specific date and event type',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              tenant_id: {
-                type: 'string',
-                description: 'Tenant identifier for data scoping'
-              },
-              instanceName: {
-                type: 'string',
-                description: 'Archer instance name (e.g., "710100")'
-              },
-              eventType: {
-                type: 'string',
-                description: 'Type of security events to retrieve. Use "all events" to get all security events. Other types may not be supported by all Archer instances.',
-                default: 'all events'
-              },
-              eventsForDate: {
-                type: 'string',
-                description: 'Date/range for security events. Supports: YYYY-MM-DD format, "today", "yesterday", "last 5 days", "past week", "last month", etc. Uses current server date (2025), not LLM training date.'
-              },
-              timeRange: {
-                type: 'string',
-                description: 'Alternative to eventsForDate. Supports: "5d", "7d", "30d" for last N days, "today", "yesterday", etc. Uses current server date (2025), not LLM training date.'
-              },
-              archer_connection: {
-                type: 'object',
-                description: 'Archer connection details'
-              }
-            },
-            required: ['tenant_id']
-          }
-        },
-        {
-          name: 'generate_security_events_report',
-          description: 'Generate a comprehensive report of all security events for analysis. Returns detailed event data, patterns, and security insights.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              tenant_id: {
-                type: 'string',
-                description: 'Tenant identifier for data scoping'
-              },
-              instanceName: {
-                type: 'string',
-                description: 'Archer instance name (e.g., "710100")'
-              },
-              eventType: {
-                type: 'string',
-                description: 'Type of security events to retrieve. Use "all events" to get all security events. Other types may not be supported by all Archer instances.',
-                default: 'all events'
-              },
-              eventsForDate: {
-                type: 'string',
-                description: 'Date/range for security events. Supports: YYYY-MM-DD format, "today", "yesterday", "last 5 days", "past week", "last month", etc. Uses current server date (2025), not LLM training date.'
-              },
-              timeRange: {
-                type: 'string',
-                description: 'Alternative to eventsForDate. Supports: "5d", "7d", "30d" for last N days, "today", "yesterday", etc. Uses current server date (2025), not LLM training date.'
-              },
-              maxEvents: {
-                type: 'number',
-                description: 'Maximum number of events to include in detailed report (default: 100, max: 500)',
-                default: 100
-              },
-              archer_connection: {
-                type: 'object',
-                description: 'Archer connection details'
-              }
-            },
-            required: ['tenant_id']
-          }
-        }
-      ];
-
+      // Use centralized tools registry for single source of truth
+      const tools: Tool[] = getAllTools();
       return { tools };
     });
 
@@ -1693,8 +1350,9 @@ class GRCMCPServer {
     }
 
     try {
-      const archerClient = new ArcherAPIClient(connection);
-      console.log('[getArcherApplications] Creating Archer client and calling getApplications()...');
+      const clientManager = ArcherClientManager.getInstance();
+      const archerClient = await clientManager.getClient(connection);
+      console.log('[getArcherApplications] Using managed Archer client for getApplications()...');
       const applications = await archerClient.getApplications();
       console.log(`[getArcherApplications] Received ${applications.length} applications from client`);
 
@@ -1763,8 +1421,9 @@ class GRCMCPServer {
     }
 
     try {
-      console.log(`[searchArcherRecords] Creating Archer client for ${applicationName}`);
-      const archerClient = new ArcherAPIClient(connection);
+      console.log(`[searchArcherRecords] Using managed Archer client for ${applicationName}`);
+      const clientManager = ArcherClientManager.getInstance();
+      const archerClient = await clientManager.getClient(connection);
       
       console.log(`[searchArcherRecords] Calling archerClient.searchRecords with pageSize=${Math.min(pageSize, 500)}, pageNumber=${pageNumber}`);
       const searchResults = await archerClient.searchRecords(applicationName, Math.min(pageSize, 500), pageNumber);
@@ -1865,7 +1524,8 @@ class GRCMCPServer {
     }
 
     try {
-      const archerClient = new ArcherAPIClient(connection);
+      const clientManager = ArcherClientManager.getInstance();
+      const archerClient = await clientManager.getClient(connection);
       const stats = await archerClient.getApplicationStats(applicationName);
 
       let resultText = `Statistics for "${stats.applicationName}" (Tenant: ${tenant_id})\n`;
@@ -1918,7 +1578,8 @@ class GRCMCPServer {
     }
 
     try {
-      const archerClient = new ArcherAPIClient(archer_connection);
+      const clientManager = ArcherClientManager.getInstance();
+      const archerClient = await clientManager.getClient(archer_connection);
       
       // If specific application mentioned, get its data
       let dataContext = '';
@@ -1986,7 +1647,8 @@ class GRCMCPServer {
     }
 
     try {
-      const archerClient = new ArcherAPIClient(archer_connection);
+      const clientManager = ArcherClientManager.getInstance();
+      const archerClient = await clientManager.getClient(archer_connection);
       const applications = await archerClient.getApplications();
       
       let insightsResult = `# GRC Data Summary for ${tenant_id}\n\n`;
@@ -2063,7 +1725,8 @@ class GRCMCPServer {
 
     // Test actual connection
     try {
-      const archerClient = new ArcherAPIClient(connection);
+      const clientManager = ArcherClientManager.getInstance();
+      const archerClient = await clientManager.getClient(connection);
       await archerClient.getApplications(); // Try to get applications to test connection
       
       return {
@@ -2122,8 +1785,9 @@ class GRCMCPServer {
     }
 
     try {
-      // Use ArcherAPIClient like the other working methods
-      const archerClient = new ArcherAPIClient(connection);
+      // Use managed ArcherAPIClient like the other working methods
+      const clientManager = ArcherClientManager.getInstance();
+      const archerClient = await clientManager.getClient(connection);
       
       // For now, return a basic implementation since ArcherAPIClient may not have getApplicationFields method yet
       return {
@@ -2171,8 +1835,9 @@ class GRCMCPServer {
     }
 
     try {
-      // Use ArcherAPIClient like the other working methods
-      const archerClient = new ArcherAPIClient(connection);
+      // Use managed ArcherAPIClient like the other working methods
+      const clientManager = ArcherClientManager.getInstance();
+      const archerClient = await clientManager.getClient(connection);
       
       // Use existing searchRecords method with parameters for top records
       const searchResults = await archerClient.searchRecords(applicationName, Math.min(recordCount, 100), 1);
@@ -2240,8 +1905,9 @@ class GRCMCPServer {
     }
 
     try {
-      // Use ArcherAPIClient like the other working methods
-      const archerClient = new ArcherAPIClient(connection);
+      // Use managed ArcherAPIClient like the other working methods
+      const clientManager = ArcherClientManager.getInstance();
+      const archerClient = await clientManager.getClient(connection);
       
       // For now, return a basic implementation since ArcherAPIClient may not have findRecordById method yet
       return {
@@ -2288,8 +1954,9 @@ class GRCMCPServer {
     }
 
     try {
-      // Use ArcherAPIClient like the other working methods
-      const archerClient = new ArcherAPIClient(connection);
+      // Use managed ArcherAPIClient like the other working methods
+      const clientManager = ArcherClientManager.getInstance();
+      const archerClient = await clientManager.getClient(connection);
       
       const datafeeds = await archerClient.getDatafeeds(activeOnly !== false);
       
@@ -2354,7 +2021,8 @@ class GRCMCPServer {
     }
 
     try {
-      const archerClient = new ArcherAPIClient(connection);
+      const clientManager = ArcherClientManager.getInstance();
+      const archerClient = await clientManager.getClient(connection);
       const history = await archerClient.getDatafeedHistory(datafeedGuid);
       
       let resultText = `Datafeed History for GUID: ${datafeedGuid} (Tenant: ${tenant_id})\n`;
@@ -2434,7 +2102,8 @@ class GRCMCPServer {
     }
 
     try {
-      const archerClient = new ArcherAPIClient(connection);
+      const clientManager = ArcherClientManager.getInstance();
+      const archerClient = await clientManager.getClient(connection);
       const messages = await archerClient.getDatafeedHistoryMessages(historyId);
       
       let resultText = `Datafeed History Messages for ID: ${historyId} (Tenant: ${tenant_id})\n`;
@@ -2507,7 +2176,8 @@ class GRCMCPServer {
     }
 
     try {
-      const archerClient = new ArcherAPIClient(connection);
+      const clientManager = ArcherClientManager.getInstance();
+      const archerClient = await clientManager.getClient(connection);
       const healthReport = await archerClient.checkDatafeedHealth();
       
       let resultText = `Datafeed Health Report for tenant ${tenant_id}\n`;
@@ -2574,7 +2244,8 @@ class GRCMCPServer {
     }
 
     try {
-      const archerClient = new ArcherAPIClient(connection);
+      const clientManager = ArcherClientManager.getInstance();
+      const archerClient = await clientManager.getClient(connection);
       
       // Get security events using the proper Archer API endpoint
       const instanceName = connection.instanceName || connection.instanceId || '';
@@ -2728,7 +2399,8 @@ class GRCMCPServer {
     const limitedMaxEvents = Math.min(maxEvents || 100, 500);
 
     try {
-      const archerClient = new ArcherAPIClient(connection);
+      const clientManager = ArcherClientManager.getInstance();
+      const archerClient = await clientManager.getClient(connection);
       
       const instanceName = connection.instanceName || connection.instanceId || '';
       
@@ -2950,287 +2622,8 @@ class GRCMCPServer {
    * HTTP mode handler for list tools
    */
   public async handleListTools(): Promise<ListToolsResult> {
-    // Get all tools from the server handlers
-    const tools: Tool[] = [
-      {
-        name: 'get_archer_applications',
-        description: 'List all active Archer applications and questionnaires available for analysis',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tenant_id: {
-              type: 'string',
-              description: 'Tenant identifier for data scoping'
-            }
-          },
-          required: ['tenant_id']
-        }
-      },
-      {
-        name: 'search_archer_records',
-        description: 'Search and retrieve records from a specific Archer application with privacy protection and field transformation',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tenant_id: {
-              type: 'string',
-              description: 'Tenant identifier for data scoping'
-            },
-            applicationName: {
-              type: 'string',
-              description: 'Name or alias of the Archer application'
-            },
-            pageSize: {
-              type: 'number',
-              description: 'Number of records to return (1-10000, default: 100)',
-              minimum: 1,
-              maximum: 10000
-            },
-            pageNumber: {
-              type: 'number',
-              description: 'Page number for pagination (1-based, default: 1)',
-              minimum: 1
-            }
-          },
-          required: ['tenant_id', 'applicationName']
-        }
-      },
-      {
-        name: 'get_archer_stats',
-        description: 'Get statistical analysis and counts for Archer applications and records',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tenant_id: {
-              type: 'string',
-              description: 'Tenant identifier for data scoping'
-            }
-          },
-          required: ['tenant_id']
-        }
-      },
-      {
-        name: 'analyze_grc_data',
-        description: 'Perform advanced GRC data analysis across multiple applications',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tenant_id: {
-              type: 'string',
-              description: 'Tenant identifier for data scoping'
-            },
-            analysisType: {
-              type: 'string',
-              description: 'Type of analysis to perform'
-            }
-          },
-          required: ['tenant_id']
-        }
-      },
-      {
-        name: 'generate_insights',
-        description: 'Generate business insights from GRC data patterns and trends',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tenant_id: {
-              type: 'string',
-              description: 'Tenant identifier for data scoping'
-            },
-            insightType: {
-              type: 'string',
-              description: 'Type of insights to generate'
-            }
-          },
-          required: ['tenant_id']
-        }
-      },
-      {
-        name: 'test_archer_connection',
-        description: 'Test connectivity and authentication with Archer GRC platform',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tenant_id: {
-              type: 'string',
-              description: 'Tenant identifier for data scoping'
-            }
-          },
-          required: ['tenant_id']
-        }
-      },
-      {
-        name: 'debug_archer_api',
-        description: 'Debug Archer API calls and troubleshoot connection issues',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tenant_id: {
-              type: 'string',
-              description: 'Tenant identifier for data scoping'
-            },
-            debugLevel: {
-              type: 'string',
-              description: 'Debug level (basic, detailed, verbose)'
-            }
-          },
-          required: ['tenant_id']
-        }
-      },
-      {
-        name: 'get_application_fields',
-        description: 'Get detailed field definitions and metadata for an Archer application',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tenant_id: {
-              type: 'string',
-              description: 'Tenant identifier for data scoping'
-            },
-            applicationName: {
-              type: 'string',
-              description: 'Name or alias of the Archer application'
-            }
-          },
-          required: ['tenant_id', 'applicationName']
-        }
-      },
-      {
-        name: 'get_top_records',
-        description: 'Get top records from an application based on specified criteria',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tenant_id: {
-              type: 'string',
-              description: 'Tenant identifier for data scoping'
-            },
-            applicationName: {
-              type: 'string',
-              description: 'Name or alias of the Archer application'
-            },
-            sortBy: {
-              type: 'string',
-              description: 'Field to sort by'
-            },
-            limit: {
-              type: 'number',
-              description: 'Number of top records to return'
-            }
-          },
-          required: ['tenant_id', 'applicationName']
-        }
-      },
-      {
-        name: 'find_record_by_id',
-        description: 'Find and retrieve a specific record by its ID',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tenant_id: {
-              type: 'string',
-              description: 'Tenant identifier for data scoping'
-            },
-            applicationName: {
-              type: 'string',
-              description: 'Name or alias of the Archer application'
-            },
-            recordId: {
-              type: 'string',
-              description: 'ID of the record to retrieve'
-            }
-          },
-          required: ['tenant_id', 'applicationName', 'recordId']
-        }
-      },
-      {
-        name: 'get_datafeeds',
-        description: 'Get information about Archer data feeds and import processes',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tenant_id: {
-              type: 'string',
-              description: 'Tenant identifier for data scoping'
-            }
-          },
-          required: ['tenant_id']
-        }
-      },
-      {
-        name: 'get_datafeed_history',
-        description: 'Get execution history for Archer data feeds',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tenant_id: {
-              type: 'string',
-              description: 'Tenant identifier for data scoping'
-            },
-            datafeedId: {
-              type: 'string',
-              description: 'ID of the data feed'
-            }
-          },
-          required: ['tenant_id']
-        }
-      },
-      {
-        name: 'get_datafeed_history_messages',
-        description: 'Get detailed messages from data feed execution history',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tenant_id: {
-              type: 'string',
-              description: 'Tenant identifier for data scoping'
-            },
-            historyId: {
-              type: 'string',
-              description: 'ID of the data feed history entry'
-            }
-          },
-          required: ['tenant_id', 'historyId']
-        }
-      },
-      {
-        name: 'check_datafeed_health',
-        description: 'Check the health and status of Archer data feeds',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tenant_id: {
-              type: 'string',
-              description: 'Tenant identifier for data scoping'
-            }
-          },
-          required: ['tenant_id']
-        }
-      },
-      {
-        name: 'get_security_events',
-        description: 'Get security events and audit information from Archer',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tenant_id: {
-              type: 'string',
-              description: 'Tenant identifier for data scoping'
-            },
-            eventType: {
-              type: 'string',
-              description: 'Type of security events to retrieve'
-            },
-            timeRange: {
-              type: 'string',
-              description: 'Time range for events (e.g., 24h, 7d, 30d)'
-            }
-          },
-          required: ['tenant_id']
-        }
-      }
-    ];
-    
+    // Use centralized tools registry for single source of truth
+    const tools: Tool[] = getAllTools();
     return { tools };
   }
 

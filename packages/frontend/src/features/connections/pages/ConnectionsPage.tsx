@@ -18,7 +18,7 @@ import {
   Trash2,
   Shield
 } from 'lucide-react';
-import { ArcherCredentials, getAllCredentials, saveCredentials, credentialsManager } from '@/lib/credentialsApi';
+import { ArcherCredentials, getAllCredentials, saveCredentials, deleteCredentials, credentialsManager } from '@/lib/backendCredentialsApi';
 
 interface Connection {
   id: string;
@@ -210,7 +210,7 @@ export const ConnectionsPage: React.FC = () => {
             password: passwordToSave,
             instanceId: connection.instanceName || '',
             instanceName: connection.instanceName || '',
-            userDomainId: '1', // Default user domain
+            userDomainId: null, // Default user domain (null for no domain)
             isDefault: false, // Will be set appropriately
             created: new Date().toISOString(),
             lastTested: connection.lastTested?.toISOString(),
@@ -348,7 +348,23 @@ export const ConnectionsPage: React.FC = () => {
       if (testResult.success) {
         alert(`✅ Connection "${credentialToTest.name}" test successful!\n${testResult.message}`);
       } else {
-        alert(`❌ Connection "${credentialToTest.name}" test failed!\n${testResult.message || testResult.error}`);
+        // Format error message properly
+        let errorMessage = testResult.message || 'Unknown error';
+        if (testResult.error && typeof testResult.error === 'object') {
+          // Extract meaningful error details from Archer API error object
+          if (testResult.error.Description) {
+            errorMessage = testResult.error.Description.replace('ValidationMessageTemplates:', '');
+          } else if (testResult.error.MessageKey) {
+            errorMessage = testResult.error.MessageKey.replace('ValidationMessageTemplates:', '');
+          } else if (testResult.error.Reason) {
+            errorMessage = `${testResult.error.Reason}: Invalid credentials or configuration`;
+          } else {
+            errorMessage = JSON.stringify(testResult.error, null, 2);
+          }
+        } else if (testResult.error) {
+          errorMessage = String(testResult.error);
+        }
+        alert(`❌ Connection "${credentialToTest.name}" test failed!\n${errorMessage}`);
       }
       
     } catch (error) {
@@ -386,26 +402,20 @@ export const ConnectionsPage: React.FC = () => {
     }
     
     try {
-      console.log('Deleting connection:', connectionId);
+      console.log('🗑️ Deleting connection:', connectionId);
       
       // Set tenant context for secure partitioning
       credentialsManager.setTenantContext(tenant.id);
       
-      // Load current credentials and filter out the one to delete
-      const allCredentials = await getAllCredentials();
-      const updatedCredentials = allCredentials.filter(cred => cred.id !== connectionId);
-      
-      console.log('Credentials before delete:', allCredentials.length, 'after delete:', updatedCredentials.length);
-      
-      // Save the updated credentials list (this will remove the deleted one)
-      await credentialsManager.storeCredentials(updatedCredentials);
+      // Delete the connection using the database API
+      await deleteCredentials(connectionId);
       
       // Reload connections to reflect the deletion
       await loadConnections();
       
-      console.log('Successfully deleted connection from credentials API');
+      console.log('✅ Successfully deleted connection from database');
     } catch (error) {
-      console.error('Error deleting connection:', error);
+      console.error('❌ Error deleting connection:', error);
       alert('Failed to delete connection: ' + (error as Error).message);
     }
   };
