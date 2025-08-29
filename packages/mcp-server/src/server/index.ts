@@ -21,10 +21,13 @@ import { PrivacyProtector } from '../privacy-protector';
 interface ArcherConnection {
   baseUrl: string;
   username: string;
-  password: string;
+  password?: string; // Optional now since we can use session tokens
   instanceId: string;
   instanceName?: string;
   userDomainId?: string;
+  // New session token support
+  sessionToken?: string;
+  sessionExpiresAt?: string;
 }
 
 /**
@@ -216,6 +219,7 @@ interface RequestOptions {
 class ArcherClientManager {
   private static instance: ArcherClientManager;
   private clients = new Map<string, ArcherAPIClient>();
+  private failedAttempts = new Map<string, { count: number; lastAttempt: Date }>();
 
   private constructor() {}
 
@@ -247,19 +251,68 @@ class ArcherClientManager {
 
   /**
    * Generate unique key for connection to ensure tenant isolation
+   * Includes session token to support multiple users with same credentials
    */
   private generateConnectionKey(connection: ArcherConnection): string {
-    return `${connection.baseUrl}|${connection.instanceId}|${connection.username}|${connection.userDomainId || 'null'}`;
+    // Include session token hash for unique user sessions
+    const sessionKey = connection.sessionToken ? connection.sessionToken.substring(0, 12) : 'no-session';
+    return `${connection.baseUrl}|${connection.instanceId}|${connection.username}|${connection.userDomainId || 'null'}|${sessionKey}`;
   }
 
   /**
    * Ensure client is authenticated, re-authenticate if session expired
+   * Implements failure tracking to prevent account lockouts
    */
   private async ensureAuthenticated(client: ArcherAPIClient): Promise<void> {
-    if (!client.hasValidSession()) {
-      console.log('[Archer Client Manager] Session expired or missing, re-authenticating...');
-      await client.authenticate();
+    const connection = client.getConnection();
+    const key = this.generateConnectionKey(connection);
+    
+    // Check if we have recent failed attempts
+    const failureInfo = this.failedAttempts.get(key);
+    if (failureInfo) {
+      const timeSinceLastFailure = Date.now() - failureInfo.lastAttempt.getTime();
+      const cooldownMinutes = Math.min(failureInfo.count * 5, 30); // 5-30 min cooldown based on failures
+      const cooldownMs = cooldownMinutes * 60 * 1000;
+      
+      if (timeSinceLastFailure < cooldownMs) {
+        const remainingMinutes = Math.ceil((cooldownMs - timeSinceLastFailure) / 60000);
+        console.warn(`[Archer Client Manager] Authentication cooldown active. ${remainingMinutes} minutes remaining.`);
+        throw new Error(`Authentication temporarily disabled due to previous failures. Try again in ${remainingMinutes} minutes.`);
+      }
     }
+    
+    if (!client.hasValidSession()) {
+      console.log('[Archer Client Manager] Session expired or missing, attempting authentication...');
+      try {
+        const success = await client.authenticate();
+        if (success) {
+          // Clear any previous failure tracking on success
+          this.failedAttempts.delete(key);
+          console.log('[Archer Client Manager] Authentication successful');
+        } else {
+          this.trackAuthFailure(key);
+          throw new Error('Authentication failed');
+        }
+      } catch (error) {
+        this.trackAuthFailure(key);
+        throw error;
+      }
+    }
+  }
+  
+  /**
+   * Track authentication failures to implement cooldown
+   */
+  private trackAuthFailure(key: string): void {
+    const existing = this.failedAttempts.get(key);
+    const count = existing ? existing.count + 1 : 1;
+    
+    this.failedAttempts.set(key, {
+      count,
+      lastAttempt: new Date()
+    });
+    
+    console.warn(`[Archer Client Manager] Authentication failure #${count} tracked. Cooldown: ${Math.min(count * 5, 30)} minutes`);
   }
 
   /**
@@ -289,9 +342,18 @@ class ArcherAPIClient {
   constructor(connection: ArcherConnection) {
     this.baseUrl = connection.baseUrl;
     this.username = connection.username;
-    this.password = connection.password;
+    this.password = connection.password || '';
     this.instanceId = connection.instanceId;
     this.userDomainId = connection.userDomainId;
+
+    // If session token is provided, use it directly
+    if (connection.sessionToken) {
+      this.session = {
+        sessionToken: connection.sessionToken,
+        expiresAt: connection.sessionExpiresAt ? new Date(connection.sessionExpiresAt) : new Date(Date.now() + 20 * 60 * 1000)
+      };
+      console.log(`[Archer API] Using provided session token for ${this.username}@${this.instanceId}`);
+    }
 
     // Initialize privacy protector
     this.privacyProtector = new PrivacyProtector({
@@ -300,6 +362,21 @@ class ArcherAPIClient {
       enableTokenization: process.env.ENABLE_TOKENIZATION === 'true',
       preserveStructure: true
     });
+  }
+
+  /**
+   * Get the connection details (needed for client manager)
+   */
+  getConnection(): ArcherConnection {
+    return {
+      baseUrl: this.baseUrl,
+      username: this.username,
+      password: this.password,
+      instanceId: this.instanceId,
+      userDomainId: this.userDomainId,
+      sessionToken: this.session?.sessionToken,
+      sessionExpiresAt: this.session?.expiresAt?.toISOString()
+    };
   }
 
   /**
@@ -312,8 +389,21 @@ class ArcherAPIClient {
 
   /**
    * Authenticate with Archer GRC platform using working PoC authentication
+   * If session token is already provided, skip authentication
    */
   async authenticate(): Promise<boolean> {
+    // If we already have a valid session token from the connection, use it
+    if (this.hasValidSession()) {
+      console.log(`[Archer API] Using existing session token for ${this.username}@${this.instanceId}`);
+      return true;
+    }
+
+    // Only authenticate if we have a password and no session token
+    if (!this.password) {
+      console.error('[Archer API] No password provided and no valid session token available');
+      return false;
+    }
+
     try {
       console.log(`[Archer API] Authenticating with ${this.baseUrl}...`);
       
@@ -447,7 +537,7 @@ class ArcherAPIClient {
 
     const axiosInstance = axios.create({
       baseURL: this.baseUrl,
-      timeout: 30000,
+      timeout: 120000, // Increased to 2 minutes for large searches
       headers: {
         'User-Agent': 'GRC-AI-Platform-MCP-Server/1.0',
         'Accept': 'application/json',
@@ -1425,8 +1515,10 @@ class GRCMCPServer {
       const clientManager = ArcherClientManager.getInstance();
       const archerClient = await clientManager.getClient(connection);
       
-      console.log(`[searchArcherRecords] Calling archerClient.searchRecords with pageSize=${Math.min(pageSize, 500)}, pageNumber=${pageNumber}`);
-      const searchResults = await archerClient.searchRecords(applicationName, Math.min(pageSize, 500), pageNumber);
+      // Reduce page size to improve performance - large pages can timeout
+      const optimizedPageSize = Math.min(pageSize, 50); // Reduced from 500 to 50 for better performance
+      console.log(`[searchArcherRecords] Calling archerClient.searchRecords with pageSize=${optimizedPageSize}, pageNumber=${pageNumber}`);
+      const searchResults = await archerClient.searchRecords(applicationName, optimizedPageSize, pageNumber);
       
       console.log(`[searchArcherRecords] Search results:`, {
         applicationName: searchResults.applicationName,
@@ -1935,6 +2027,9 @@ class GRCMCPServer {
     console.log('[getDatafeeds] Method called with args:', args);
     const { tenant_id, activeOnly, archer_connection } = args;
     
+    console.log('[getDatafeeds] Raw archer_connection:', archer_connection);
+    console.log('[getDatafeeds] Environment ARCHER_BASE_URL:', process.env.ARCHER_BASE_URL);
+    
     // Use provided connection or fall back to environment variables
     const connection = archer_connection || {
       baseUrl: process.env.ARCHER_BASE_URL || '',
@@ -1943,6 +2038,8 @@ class GRCMCPServer {
       instanceId: process.env.ARCHER_INSTANCE || '',
       userDomainId: process.env.ARCHER_USER_DOMAIN_ID || ''
     };
+    
+    console.log('[getDatafeeds] Final connection being used:', connection);
     
     if (!connection.baseUrl) {
       return {
@@ -1958,11 +2055,11 @@ class GRCMCPServer {
       const clientManager = ArcherClientManager.getInstance();
       const archerClient = await clientManager.getClient(connection);
       
-      const datafeeds = await archerClient.getDatafeeds(activeOnly !== false);
+      const datafeeds = await archerClient.getDatafeeds(false); // Show all datafeeds regardless of status
       
       let resultText = `Datafeeds for tenant ${tenant_id}\n`;
       resultText += `Instance: ${connection.baseUrl}\n`;
-      resultText += `Found ${datafeeds.length} ${activeOnly !== false ? 'active' : 'total'} datafeeds\n\n`;
+      resultText += `Found ${datafeeds.length} total datafeeds (including inactive)\n\n`;
       
       if (datafeeds.length === 0) {
         resultText += 'No datafeeds found matching the criteria.';
