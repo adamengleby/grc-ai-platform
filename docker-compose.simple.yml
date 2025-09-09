@@ -1,0 +1,73 @@
+services:
+  # Local Analytics API (Replace mock data gradually)
+  analytics-api:
+    build: 
+      context: ./packages/backend
+      dockerfile: Dockerfile.local
+    ports:
+      - "3005:3005"  # Matches your existing VITE_ANALYTICS_API_URL
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=mongodb://root:localdev@mongodb:27017/grc_analytics_local
+      - REDIS_URL=redis://redis:6379
+      - MCP_SERVER_URL=http://mcp-server:3006
+      - ARCHER_API_URL=http://mock-archer:3007
+    volumes:
+      - ./packages/backend/src:/app/src
+      - ./data/local:/app/data
+    depends_on:
+      - mongodb
+      - redis
+      - mock-archer
+    command: tsx watch src/index.ts
+
+  # Enhanced MCP Server for Archer Integration
+  mcp-server:
+    build:
+      context: ./packages/mcp-server
+      dockerfile: Dockerfile.local
+    ports:
+      - "3006:3006"
+    environment:
+      - NODE_ENV=development
+      - ARCHER_API_URL=http://mock-archer:3007
+      - LOG_LEVEL=debug
+    volumes:
+      - ./packages/mcp-server/src:/app/src
+      - ./data/archer-cache:/app/cache
+
+  # Local MongoDB for analytics data
+  mongodb:
+    image: mongo:6.0
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=localdev
+      - MONGO_INITDB_DATABASE=grc_analytics_local
+    volumes:
+      - mongodb_data:/data/db
+
+  # Redis for caching and real-time features
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  # Mock Archer API (for when you don't have direct Archer access)
+  mock-archer:
+    build:
+      context: ./tools/mock-archer
+    ports:
+      - "3007:3007"
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./tools/mock-archer/data:/app/data
+
+volumes:
+  mongodb_data:
+  redis_data:

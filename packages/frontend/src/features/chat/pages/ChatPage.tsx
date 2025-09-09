@@ -1,19 +1,23 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { EnhancedMarkdown } from '../../../components/ui/EnhancedMarkdown';
-import { Send, Download, User, Bot, AlertTriangle, CheckCircle, Clock, RefreshCw, ChevronDown } from 'lucide-react';
+import { Send, Download, User, Bot, AlertTriangle, CheckCircle, Clock, RefreshCw, ChevronDown, Shield, ArrowLeft, Trash2, Copy, ThumbsUp, ThumbsDown, MoreVertical } from 'lucide-react';
 import { Button } from '@/app/components/ui/Button';
 import { Input } from '@/app/components/ui/Input';
 import { Badge } from '@/app/components/ui/Badge';
 import { Alert } from '@/app/components/ui/Alert';
 import { AIAgent } from '@/types/agent';
-import { createAgentService } from '@/lib/agentService';
+import { createAgentService } from '@/lib/backendAgentService';
 import { createLLMService, LLMResponse, LLMMessage } from '@/lib/llmService';
 import { useAuthStore } from '@/app/store/auth';
-import { credentialsManager, type ArcherCredentials } from '@/lib/credentialsApi';
+import { credentialsManager, type ArcherCredentials } from '@/lib/backendCredentialsApi';
 // import { createTestMcpServerConfig, verifyTenantMcpConfig } from '@/lib/testMcpConfig';
 import { runMCPIntegrationTests } from '@/lib/testMcpIntegration';
 // import { fixMcpEndpointConfiguration } from '../../../lib/fixMcpEndpoint';
 import { clsx } from 'clsx';
+import { ArcherAuthModal, ArcherSessionData } from '../components/ArcherAuthModal';
+import { useOAuthTokenStore } from '@/app/store/oauthToken';
+import { apiClient } from '@/services/apiClient';
 
 interface ChatMessage {
   id: string;
@@ -23,6 +27,9 @@ interface ChatMessage {
   response?: LLMResponse;
   isLoading?: boolean;
   error?: string;
+  progress?: number;
+  progressStep?: number;
+  progressTotal?: number;
 }
 
 interface ConnectionStatus {
@@ -32,10 +39,18 @@ interface ConnectionStatus {
   agentContext?: any;
   archerConnections?: ArcherCredentials[];
   selectedConnection?: ArcherCredentials | null;
+  archerSession?: ArcherSessionData | null;
+  sessionExpired?: boolean;
 }
 
 export const ChatPage: React.FC = () => {
   const { tenant } = useAuthStore();
+  const { setToken: setOAuthToken } = useOAuthTokenStore();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  
+  // Get agent ID from URL parameters
+  const agentIdFromUrl = searchParams.get('agent');
   
   // Persistent chat state with localStorage
   const getChatStorageKey = (agentId: string) => `chat_session_${tenant?.id}_${agentId}`;
@@ -101,15 +116,142 @@ export const ChatPage: React.FC = () => {
     llmConfig: null,
     agentContext: null,
     archerConnections: [],
-    selectedConnection: null
+    selectedConnection: null,
+    archerSession: null,
+    sessionExpired: false
   });
   const [isInitialized, setIsInitialized] = useState(false);
   const [conversationHistory, setConversationHistory] = useState<Record<string, LLMMessage[]>>({});
   const [error, setError] = useState<string | null>(null);
+  
+  // Authentication modal state
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authenticationRequired, setAuthenticationRequired] = useState(false);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Session management helpers
+  const isValidSession = (session: ArcherSessionData | null | undefined): boolean => {
+    if (!session) return false;
+    return new Date() < session.expiresAt;
+  };
+
+  const saveSessionToStorage = (session: ArcherSessionData) => {
+    try {
+      const sessionKey = `archer_session_id_${tenant?.id}`;
+      // Only store the sessionId, full data is retrieved from database
+      localStorage.setItem(sessionKey, session.sessionId);
+    } catch (error) {
+      console.warn('Failed to save session ID to storage:', error);
+    }
+  };
+
+  const loadSessionFromStorage = async (): Promise<ArcherSessionData | null> => {
+    try {
+      const sessionKey = `archer_session_id_${tenant?.id}`;
+      const sessionId = localStorage.getItem(sessionKey);
+      if (sessionId) {
+        // Retrieve full session data from database using sessionId
+        const response = await apiClient.getArcherSession(sessionId);
+        if (response.success && response.sessionData) {
+          // Convert date strings back to Date objects
+          const sessionData: ArcherSessionData = {
+            sessionId: response.sessionData.sessionId,
+            expiresAt: new Date(response.sessionData.expiresAt),
+            userInfo: response.sessionData.userInfo,
+            // Note: oauthToken not included in database response for security
+            oauthToken: undefined
+          };
+          return isValidSession(sessionData) ? sessionData : null;
+        } else {
+          console.warn('Failed to retrieve session from database:', response.error);
+          // Remove invalid session ID from localStorage
+          localStorage.removeItem(sessionKey);
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to load session from database:', error);
+      // Remove invalid session ID from localStorage on error
+      const sessionKey = `archer_session_id_${tenant?.id}`;
+      localStorage.removeItem(sessionKey);
+    }
+    return null;
+  };
+
+  const clearSession = () => {
+    try {
+      // Clear the new sessionId key
+      const sessionKey = `archer_session_id_${tenant?.id}`;
+      localStorage.removeItem(sessionKey);
+      
+      // Also clear the old session key for cleanup
+      const oldSessionKey = `archer_session_${tenant?.id}`;
+      localStorage.removeItem(oldSessionKey);
+    } catch (error) {
+      console.warn('Failed to clear session:', error);
+    }
+  };
+
+  const handleNewConnection = () => {
+    console.log('[Chat] New Connection requested - clearing session and showing auth modal');
+    
+    // Clear the existing session
+    clearSession();
+    
+    // Update connection status to reflect session cleared
+    setConnectionStatus(prev => ({
+      ...prev,
+      archerSession: null,
+      sessionExpired: false,
+      isConnected: false
+    }));
+    
+    // Set authentication required and show modal
+    setAuthenticationRequired(true);
+    setShowAuthModal(true);
+  };
+
+  const handleAuthenticated = (sessionData: ArcherSessionData) => {
+    console.log('[Chat] User authenticated successfully:', sessionData.userInfo);
+    
+    // Store OAuth token for MCP tool access control
+    if (sessionData.oauthToken) {
+      console.log('[Chat] Storing OAuth token for MCP tool access');
+      setOAuthToken(sessionData.oauthToken);
+    }
+    
+    // Save session to storage
+    saveSessionToStorage(sessionData);
+    
+    // Update connection status
+    setConnectionStatus(prev => ({
+      ...prev,
+      archerSession: sessionData,
+      sessionExpired: false,
+      isConnected: true,
+      lastChecked: new Date()
+    }));
+    
+    // Clear authentication flags
+    setAuthenticationRequired(false);
+    setShowAuthModal(false);
+  };
+
+  const checkSessionExpiry = () => {
+    const currentSession = connectionStatus.archerSession;
+    if (currentSession && !isValidSession(currentSession)) {
+      console.log('[Chat] Session expired, requiring re-authentication');
+      setConnectionStatus(prev => ({
+        ...prev,
+        sessionExpired: true,
+        isConnected: false
+      }));
+      clearSession();
+      setAuthenticationRequired(true);
+    }
+  };
 
   // Load available agents
   useEffect(() => {
@@ -133,6 +275,20 @@ export const ChatPage: React.FC = () => {
 
     loadAgents();
   }, [tenant?.id]);
+
+  // Handle agent selection from URL parameters
+  useEffect(() => {
+    if (agentIdFromUrl && availableAgents.length > 0 && (!selectedAgent || selectedAgent.id !== agentIdFromUrl)) {
+      const agentFromUrl = availableAgents.find(agent => agent.id === agentIdFromUrl);
+      if (agentFromUrl) {
+        console.log(`[Chat] Auto-selecting agent from URL: ${agentFromUrl.name}`);
+        setSelectedAgent(agentFromUrl);
+        saveGlobalChatState(agentFromUrl);
+      } else {
+        console.warn(`[Chat] Agent ID from URL not found: ${agentIdFromUrl}`);
+      }
+    }
+  }, [agentIdFromUrl, availableAgents, selectedAgent]);
 
   // Initialize LLM connection and load agent context
   useEffect(() => {
@@ -160,60 +316,36 @@ export const ChatPage: React.FC = () => {
           throw new Error('LLM configuration is disabled. Please enable it in Settings.');
         }
         
-        // Load Archer connections
+        // Note: We no longer load credentials from database
+        // User-direct authentication means users authenticate in the chat interface
         let archerConnections: ArcherCredentials[] = [];
         let selectedConnection: ArcherCredentials | null = null;
-        
-        try {
-          archerConnections = await credentialsManager.loadCredentials();
-          // Select the default connection or first available
-          selectedConnection = archerConnections.find(conn => conn.isDefault) || archerConnections[0] || null;
-        } catch (err) {
-          console.error('Failed to load Archer credentials:', err);
-        }
 
-        // Fix MCP endpoint configuration before running tests
-        if (tenant?.id) {
-          console.log('[Chat] Fixing MCP endpoint configuration...');
-          // Fix MCP configuration inline
-          const storageKey = `tenant_mcp_servers_${tenant.id}`;
-          const correctMcpServer = {
-            id: 'mcp-local-grc-server',
-            name: 'Local Archer GRC Server',
-            description: 'Local RSA Archer GRC Platform integration',
-            endpoint: 'http://localhost:3005', // CORRECT PORT FOR ANALYTICS BACKEND
-            connectionId: 'archer-connection-1',
-            connectionName: 'Archer UAT Connection',
-            category: 'grc',
-            status: 'connected',
-            isEnabled: true,
-            createdAt: new Date().toISOString(),
-            lastTested: new Date().toISOString()
-          };
-          localStorage.setItem(storageKey, JSON.stringify([correctMcpServer]));
-          console.log('[Chat] Fixed MCP endpoint to use port 3005');
-          
-          console.log('[Chat Test] Running comprehensive MCP integration tests...');
-          try {
-            const testsPassed = await runMCPIntegrationTests(tenant.id);
-            if (testsPassed) {
-              console.log('[Chat Test] ✅ All MCP integration tests passed!');
-            } else {
-              console.error('[Chat Test] ❌ Some MCP integration tests failed');
-            }
-          } catch (error) {
-            console.error('[Chat Test] Test execution failed:', error);
-          }
-        }
+        // MCP configuration is now handled by the database backend
         
+        // Check for existing Archer session
+        const existingSession = await loadSessionFromStorage();
+        const hasValidSession = isValidSession(existingSession);
+        
+        // Session validation handled silently
+
         setConnectionStatus({
-          isConnected: true,
+          isConnected: hasValidSession,
           lastChecked: new Date(),
           llmConfig: agentContext.llmConfig,
           agentContext: agentContext,
           archerConnections,
-          selectedConnection
+          selectedConnection,
+          archerSession: existingSession,
+          sessionExpired: Boolean(existingSession && !hasValidSession)
         });
+
+        // Set authentication requirement if no valid session
+        if (!hasValidSession) {
+          console.log('[Chat] No valid Archer session found, authentication required');
+          setAuthenticationRequired(true);
+          setShowAuthModal(true); // Show modal immediately when authentication is required
+        }
         
         // Load existing messages or add welcome message if first time
         const existingMessages = loadPersistedMessages(selectedAgent.id);
@@ -245,8 +377,7 @@ export const ChatPage: React.FC = () => {
           });
           
           // CRITICAL FIX: Set ONLY this agent's history, clear any other agent data
-          console.log(`[ChatPage] Loading agent ${selectedAgent.id} with ${history.length} conversation messages`);
-          console.log(`[ChatPage] Ensuring complete isolation from other agents`);
+          // Loading agent conversation history with isolation
           setConversationHistory({ [selectedAgent.id]: history }); // Only set this agent's history
         }
         
@@ -290,7 +421,10 @@ export const ChatPage: React.FC = () => {
 
   // Handle sending messages
   const handleSendMessage = useCallback(async () => {
-    if (!inputMessage.trim() || isLoading || !selectedAgent || !connectionStatus.isConnected) return;
+    if (!inputMessage.trim() || isLoading || !selectedAgent) return;
+
+    // Check for valid Archer session - but only show auth modal, don't block sending
+    checkSessionExpiry();
 
     const userMessage: ChatMessage = {
       id: 'user-' + Date.now(),
@@ -332,13 +466,32 @@ export const ChatPage: React.FC = () => {
         content: currentMessage
       }];
 
-      // Call LLM service with integrated MCP support
+      // Call LLM service with integrated MCP support (using session token)
       const response = await llmService.processMessage(
         selectedAgent,
         connectionStatus.llmConfig,
         currentMessage,
         newHistory.slice(-10), // Keep last 10 messages for context
-        connectionStatus.selectedConnection
+        connectionStatus.archerSession?.sessionId, // Pass only sessionId for backend lookup
+        tenant?.id,
+        // Real-time progress callback
+        (update) => {
+          const progressMessage = update.toolName 
+            ? `🔧 ${update.toolName}${update.toolProgress ? ` (${Math.round(update.toolProgress)}%)` : ''}`
+            : update.message;
+          
+          setMessages(prev => prev.map(msg => 
+            msg.id === loadingMessage.id
+              ? {
+                  ...msg,
+                  content: progressMessage,
+                  progress: update.toolProgress,
+                  progressStep: update.step,
+                  progressTotal: update.totalSteps
+                }
+              : msg
+          ));
+        }
       );
 
       // Update conversation history
@@ -532,134 +685,211 @@ export const ChatPage: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-200px)] space-y-6">
-      {/* Header with Agent Dropdown */}
-      <div className="flex-shrink-0">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">GRC AI Chat</h1>
-            <p className="text-muted-foreground mt-2">
-              Interactive AI analysis for governance, risk, and compliance
-            </p>
-          </div>
-          
-          <div className="flex items-center space-x-2">
-            {/* Connection Status */}
-            <div className={clsx(
-              'flex items-center space-x-1 px-2 py-1 rounded-full text-xs',
-              connectionStatus.isConnected 
-                ? 'bg-green-100 text-green-700' 
-                : 'bg-red-100 text-red-700'
-            )}>
-              {connectionStatus.isConnected ? (
-                <CheckCircle className="h-3 w-3" />
-              ) : (
-                <AlertTriangle className="h-3 w-3" />
-              )}
-              <span>{connectionStatus.isConnected ? 'Connected' : 'Disconnected'}</span>
+    <div className="flex flex-col h-screen">
+      {/* Header with Input-Style Design */}
+      <div className="sticky top-0 z-50 flex-shrink-0 border-b border-gray-200 bg-white shadow-sm">
+        <div className="px-4 py-4 sm:px-6">
+          <div className="w-full">
+            <div className="relative flex items-center gap-3">
+              {/* Left Section in Rounded Container */}
+              <div className="flex-1 flex items-center gap-3 rounded-2xl border border-gray-300 px-4 py-3 bg-white shadow-sm">
+                {/* Back Button */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => navigate('/agents')}
+                  className="p-1 hover:bg-gray-50 rounded-lg flex-shrink-0"
+                >
+                  <ArrowLeft className="h-4 w-4 text-gray-600" />
+                </Button>
+                
+                {/* Title with Icon */}
+                <div className="flex items-center space-x-2 flex-shrink-0">
+                  <div className="h-7 w-7 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center">
+                    <Bot className="h-4 w-4 text-white" />
+                  </div>
+                  <h1 className="text-sm font-semibold text-gray-900 hidden sm:block">GRC AI Chat</h1>
+                </div>
+                
+                {/* Agent Selector */}
+                <div className="flex-1 min-w-0">
+                  <div className="relative">
+                    <select
+                      value={selectedAgent.id}
+                      onChange={(e) => {
+                        const agent = availableAgents.find(a => a.id === e.target.value);
+                        if (agent) handleAgentSelect(agent);
+                      }}
+                      className="w-full appearance-none bg-gray-50 border-0 rounded-lg px-3 py-1.5 pr-8 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white"
+                      aria-label="Select AI Agent"
+                    >
+                      {availableAgents.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400 pointer-events-none" />
+                  </div>
+                </div>
+              </div>
+              
+              {/* Right Section - Status & Actions */}
+              <div className="flex items-center gap-2">
+                {/* Connection Status */}
+                <div className="flex items-center space-x-1.5 bg-gray-50 rounded-full px-3 py-1.5 text-xs shadow-sm">
+                  <div className={clsx(
+                    'h-2 w-2 rounded-full',
+                    (connectionStatus.archerSession && !connectionStatus.sessionExpired) ? 'bg-green-500' : 'bg-amber-500'
+                  )} />
+                  <span className="font-medium text-gray-700 hidden sm:inline">
+                    {(connectionStatus.archerSession && !connectionStatus.sessionExpired) ? 'Connected' : 'Offline'}
+                  </span>
+                </div>
+                
+                {/* Action Buttons */}
+                <div className="flex items-center gap-1">
+                  {/* Primary Connect Button */}
+                  <button
+                    onClick={handleNewConnection}
+                    disabled={isLoading}
+                    className="h-9 w-9 rounded-full bg-blue-500 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center transition-colors shadow-sm"
+                    title="Connect to Archer"
+                    aria-label="Connect to Archer"
+                  >
+                    <Shield className="h-4 w-4 text-white" />
+                  </button>
+                  
+                  {/* Secondary Actions - Hidden on small screens */}
+                  <div className="hidden md:flex items-center gap-1">
+                    <button
+                      onClick={handleRefreshConnection}
+                      disabled={isLoading}
+                      className="h-9 w-9 rounded-full bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center transition-colors shadow-sm"
+                      title="Refresh Connection"
+                      aria-label="Refresh connection"
+                    >
+                      <RefreshCw className={clsx('h-4 w-4 text-gray-600', isLoading && 'animate-spin')} />
+                    </button>
+                    
+                    <button
+                      onClick={handleClearChat}
+                      disabled={isLoading}
+                      className="h-9 w-9 rounded-full bg-white border border-gray-200 hover:bg-red-50 hover:border-red-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center transition-colors shadow-sm"
+                      title="Clear Chat"
+                      aria-label="Clear chat history"
+                    >
+                      <Trash2 className="h-4 w-4 text-red-500" />
+                    </button>
+                  </div>
+                  
+                  {/* Mobile Menu */}
+                  <button
+                    className="h-9 w-9 rounded-full bg-white border border-gray-200 hover:bg-gray-50 flex items-center justify-center transition-colors shadow-sm md:hidden"
+                    title="More Options"
+                    aria-label="More options"
+                  >
+                    <MoreVertical className="h-4 w-4 text-gray-600" />
+                  </button>
+                </div>
+              </div>
             </div>
-            
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRefreshConnection}
-              disabled={isLoading}
-            >
-              <RefreshCw className={clsx('h-4 w-4', isLoading && 'animate-spin')} />
-            </Button>
-            
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleClearChat}
-              disabled={isLoading}
-              className="text-red-600 hover:text-red-700"
-            >
-              Clear Chat
-            </Button>
-            
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExportConversation}
-              disabled={messages.length === 0}
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Export
-            </Button>
-          </div>
-        </div>
-
-        {/* Agent Selector */}
-        <div className="flex items-center space-x-4">
-          <label className="text-sm font-medium">AI Agent:</label>
-          <div className="relative">
-            <select
-              value={selectedAgent.id}
-              onChange={(e) => {
-                const agent = availableAgents.find(a => a.id === e.target.value);
-                if (agent) handleAgentSelect(agent);
-              }}
-              className="appearance-none bg-white border border-gray-300 rounded-md px-4 py-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-            >
-              {availableAgents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name} - {agent.description}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
           </div>
         </div>
       </div>
 
+
       {/* Error Alert */}
       {error && (
-        <Alert variant="destructive" className="flex-shrink-0">
-          <AlertTriangle className="h-4 w-4" />
-          <div>
-            <strong>Connection Error:</strong> {error}
-          </div>
-        </Alert>
+        <div className="flex-shrink-0 px-4 py-2 sm:px-6">
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <div>
+              <strong>Connection Error:</strong> {error}
+            </div>
+          </Alert>
+        </div>
       )}
 
-      {/* Full Width Chat Interface */}
-      <div className="flex-1 flex flex-col bg-white border border-gray-200 rounded-lg min-h-0">
-        {/* Messages Area */}
-        <div className="flex-1 p-6 overflow-y-auto space-y-4">
+      {/* Full Height Chat Interface */}
+      <div className="flex-1 flex flex-col min-h-0 bg-gray-50">
+        {/* Messages Area - Accessible */}
+        <div 
+          className="flex-1 px-4 pt-24 pb-24 overflow-y-auto space-y-6 sm:px-6 w-full"
+          role="log"
+          aria-label="Chat messages"
+          aria-live="polite"
+          aria-atomic="false"
+        >
           {messages.map((message) => (
-            <div
+            <article
               key={message.id}
               className={clsx(
-                'flex items-start space-x-3',
-                message.type === 'user' ? 'justify-end' : 'justify-start'
+                'flex gap-4 group',
+                message.type === 'user' ? 'flex-row-reverse' : 'flex-row'
               )}
+              role="article"
+              aria-label={`${message.type === 'user' ? 'User message' : 'AI agent response'} at ${formatTimestamp(message.timestamp)}`}
             >
-              {message.type === 'agent' && (
-                <div className="flex-shrink-0 w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
-                  <Bot className="h-4 w-4 text-primary" />
-                </div>
-              )}
+              {/* Avatar */}
+              <div className="flex-shrink-0">
+                {message.type === 'agent' ? (
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center">
+                    <Bot className="h-5 w-5 text-white" />
+                  </div>
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center">
+                    <User className="h-5 w-5 text-white" />
+                  </div>
+                )}
+              </div>
               
+              {/* Message Content */}
               <div className={clsx(
-                'max-w-[70%] rounded-lg px-4 py-3',
-                message.type === 'user'
-                  ? 'bg-primary text-primary-foreground'
-                  : message.error
-                  ? 'bg-red-50 border border-red-200'
-                  : 'bg-gray-50'
+                'flex-1 max-w-[75%]',
+                message.type === 'user' ? 'mr-auto' : 'ml-0'
               )}>
-                <div className="space-y-2">
-                  <div className="text-sm markdown-content">
+                <div className={clsx(
+                  'rounded-2xl px-4 py-3 shadow-sm',
+                  message.type === 'user'
+                    ? 'bg-blue-600 text-white rounded-br-md'
+                    : message.error
+                    ? 'bg-red-50 border border-red-200 text-red-900 rounded-bl-md'
+                    : 'bg-white border border-gray-200 text-gray-900 rounded-bl-md'
+                )}>
+                  {/* Message Text */}
+                  <div className={clsx(
+                    "text-[15px] leading-relaxed markdown-content",
+                    message.type === 'user' && "text-white [&_*]:text-white [&_*]:border-none [&_h1]:border-none [&_h1]:border-b-0"
+                  )} style={message.type === 'user' ? { color: 'white' } : {}}>
                     <EnhancedMarkdown>
                       {message.content}
                     </EnhancedMarkdown>
                   </div>
                   
+                  {/* Modern Loading State */}
                   {message.isLoading && (
-                    <div className="flex items-center space-x-2 text-xs text-muted-foreground">
-                      <Clock className="h-3 w-3 animate-spin" />
-                      <span>Processing...</span>
+                    <div className="mt-3 pt-3 border-t border-gray-100">
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                          <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                          <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"></div>
+                        </div>
+                        <span className="text-sm text-gray-600">
+                          {message.progressStep && message.progressTotal 
+                            ? `Step ${message.progressStep}/${message.progressTotal}` 
+                            : 'Processing...'}
+                        </span>
+                      </div>
+                      {message.progress && (
+                        <div className="mt-2 w-full bg-gray-200 rounded-full h-1">
+                          <div 
+                            className="bg-gradient-to-r from-blue-500 to-purple-600 h-1 rounded-full transition-all duration-500 ease-out" 
+                            style={{ width: `${message.progress}%` }}
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
                   
@@ -669,8 +899,8 @@ export const ChatPage: React.FC = () => {
                       {message.response.toolsUsed && message.response.toolsUsed.length > 0 && (
                         <div className="flex flex-wrap gap-1">
                           <span className="text-muted-foreground mr-2">Archer tools used:</span>
-                          {message.response.toolsUsed.map((tool: string) => (
-                            <Badge key={tool} variant="outline" className="text-xs bg-blue-50 text-blue-700">
+                          {message.response.toolsUsed.map((tool: string, index: number) => (
+                            <Badge key={`${message.id}-${tool}-${index}`} variant="outline" className="text-xs bg-blue-50 text-blue-700">
                               {tool}
                             </Badge>
                           ))}
@@ -697,60 +927,165 @@ export const ChatPage: React.FC = () => {
                     </div>
                   )}
                   
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{formatTimestamp(message.timestamp)}</span>
+                  {/* Message Actions & Timestamp */}
+                  <div className="flex items-center justify-between mt-3">
+                    <div className="flex items-center space-x-1">
+                      {message.type === 'agent' && !message.isLoading && (
+                        <div className="flex items-center space-x-1 bg-gray-50 rounded-full px-2 py-1 opacity-0 group-hover:opacity-100 transition-all duration-200">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-gray-500 hover:text-gray-700 hover:bg-white rounded-full transition-colors"
+                            onClick={() => navigator.clipboard.writeText(message.content)}
+                            title="Copy message"
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                          <div className="w-px h-3 bg-gray-300" />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded-full transition-colors"
+                            title="Good response"
+                          >
+                            <ThumbsUp className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                            title="Poor response"
+                          >
+                            <ThumbsDown className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-xs text-gray-400">{formatTimestamp(message.timestamp)}</span>
                   </div>
                 </div>
               </div>
-              
-              {message.type === 'user' && (
-                <div className="flex-shrink-0 w-8 h-8 bg-primary rounded-full flex items-center justify-center">
-                  <User className="h-4 w-4 text-primary-foreground" />
-                </div>
-              )}
-            </div>
+            </article>
           ))}
           <div ref={messagesEndRef} />
         </div>
         
-        {/* Input Area */}
-        <div className="border-t border-gray-200 p-4">
-          <div className="flex space-x-2">
-            <Input
-              ref={inputRef}
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              placeholder={`Ask ${selectedAgent.name} about GRC analysis...`}
-              disabled={isLoading || !connectionStatus.isConnected}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSendMessage();
-                }
-              }}
-              className="flex-1"
-            />
-            <Button
-              onClick={handleSendMessage}
-              disabled={isLoading || !inputMessage.trim() || !connectionStatus.isConnected}
-              size="default"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
-          </div>
+        {/* Modern Input Area */}
+        <div className="flex-shrink-0 border-t border-gray-200 bg-white px-4 py-4 sm:px-6">
+          <div className="w-full">
+            <div className="relative flex items-end gap-3">
+              <div className="flex-1 relative">
+                <textarea
+                  ref={inputRef as any}
+                  value={inputMessage}
+                  onChange={(e) => {
+                    setInputMessage(e.target.value);
+                    // Auto-resize textarea
+                    const textarea = e.target as HTMLTextAreaElement;
+                    textarea.style.height = 'auto';
+                    textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+                  }}
+                  placeholder={`Message ${selectedAgent.name}...`}
+                  disabled={isLoading}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage();
+                    }
+                  }}
+                  className="w-full min-h-[44px] max-h-[120px] resize-none rounded-2xl border border-gray-300 px-4 py-3 pr-12 text-[15px] leading-relaxed focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none placeholder:text-gray-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed touch-manipulation"
+                  rows={1}
+                  aria-label="Type your message"
+                  aria-describedby="input-hint"
+                  aria-expanded={false}
+                />
+                <button
+                  onClick={handleSendMessage}
+                  disabled={isLoading || !inputMessage.trim()}
+                  className="absolute right-3 bottom-3 h-9 w-9 rounded-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-all duration-200 shadow-md flex items-center justify-center border-none outline-none"
+                  aria-label="Send message"
+                  title="Send message (Enter)"
+                >
+                  {/* Right arrow as send icon */}
+                  <div className="text-white text-xl font-bold">
+                    ▶
+                  </div>
+                </button>
+              </div>
+            </div>
           
-          <div className="flex items-center justify-between mt-2">
-            <p className="text-xs text-muted-foreground">
-              {selectedAgent.name} • {selectedAgent.useCase}
-              {connectionStatus.llmConfig && (
-                <span className="ml-2">
-                  • {connectionStatus.llmConfig.provider} ({connectionStatus.llmConfig.model})
-                </span>
-              )}
-            </p>
+            {/* Input Footer */}
+            <div className="flex items-center justify-between mt-3 px-1">
+              <div className="flex items-center space-x-2 text-xs text-gray-500">
+                <span>{selectedAgent.name}</span>
+                <span>•</span>
+                <span>{selectedAgent.useCase}</span>
+                {connectionStatus.llmConfig && (
+                  <>
+                    <span>•</span>
+                    <span>{connectionStatus.llmConfig.provider} ({connectionStatus.llmConfig.model})</span>
+                  </>
+                )}
+                {(connectionStatus.archerSession && !connectionStatus.sessionExpired) ? (
+                  <>
+                    <span>•</span>
+                    <div className="flex items-center space-x-1">
+                      <div className="h-1.5 w-1.5 bg-green-500 rounded-full" />
+                      <span className="text-green-600">Archer Connected</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <span>•</span>
+                    <div className="flex items-center space-x-1">
+                      <div className="h-1.5 w-1.5 bg-orange-500 rounded-full" />
+                      <span className="text-orange-600">No Archer Connection</span>
+                    </div>
+                  </>
+                )}
+              </div>
+              <div id="input-hint" className="text-xs text-gray-400">
+                Press Shift+Enter for new line
+              </div>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Authentication Required Prompt */}
+      {authenticationRequired && !showAuthModal && (
+        <div className="mx-4 mb-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 shadow-md">
+          <div className="flex items-center gap-3">
+            <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full flex items-center justify-center shadow-sm">
+              <Shield className="h-5 w-5 text-white" />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-blue-900">
+                Archer Authentication Required
+              </p>
+              <p className="text-xs text-blue-700 mt-0.5">
+                Connect to unlock enhanced GRC capabilities
+              </p>
+            </div>
+            <Button
+              onClick={() => setShowAuthModal(true)}
+              size="sm"
+              className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border-0 px-5 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 shadow-sm hover:shadow-md"
+            >
+              Connect
+            </Button>
+          </div>
+        </div>
+      )}
+
+
+      {/* Authentication Modal */}
+      <ArcherAuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onAuthenticated={handleAuthenticated}
+        tenantId={tenant?.id || ''}
+      />
     </div>
   );
 };

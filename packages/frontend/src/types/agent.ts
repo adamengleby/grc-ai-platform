@@ -3,7 +3,7 @@ export interface AIAgent {
   name: string;
   description: string;
   persona: string; // The agent's behavior/personality
-  systemPrompt: string; // Instructions for how the agent should behave
+  systemPrompt: string; // Complete instructions including useCase, capabilities, and behavior
   
   // LLM Configuration
   llmConfigId: string; // Reference to LLM configuration
@@ -11,9 +11,6 @@ export interface AIAgent {
   // MCP Server Access
   enabledMcpServers: string[]; // List of MCP server IDs this agent can use
   
-  // Agent Settings
-  capabilities: string[]; // What this agent is good at
-  useCase: string; // Primary use case (risk-analysis, compliance-audit, etc.)
   
   // Metadata
   isEnabled: boolean;
@@ -61,60 +58,12 @@ export interface AgentStatus {
   lastHealthCheck?: string;
 }
 
-export interface AgentCapability {
-  id: string;
-  name: string;
-  description: string;
-  category: 'risk' | 'compliance' | 'governance' | 'reporting' | 'analysis';
-}
-
-export const AGENT_CAPABILITIES: AgentCapability[] = [
-  {
-    id: 'risk-analysis',
-    name: 'Risk Analysis',
-    description: 'Analyze and assess various types of organizational risks',
-    category: 'risk'
-  },
-  {
-    id: 'compliance-audit',
-    name: 'Compliance Auditing',
-    description: 'Evaluate compliance status against regulatory frameworks',
-    category: 'compliance'
-  },
-  {
-    id: 'control-assessment',
-    name: 'Control Assessment',
-    description: 'Assess effectiveness of organizational controls',
-    category: 'governance'
-  },
-  {
-    id: 'executive-reporting',
-    name: 'Executive Reporting',
-    description: 'Generate executive-level insights and dashboards',
-    category: 'reporting'
-  },
-  {
-    id: 'anomaly-detection',
-    name: 'Anomaly Detection',
-    description: 'Identify unusual patterns and potential issues',
-    category: 'analysis'
-  },
-  {
-    id: 'trend-analysis',
-    name: 'Trend Analysis',
-    description: 'Analyze trends and predict future patterns',
-    category: 'analysis'
-  }
-];
-
 export interface AgentPreset {
   id: string;
   name: string;
   description: string;
   persona: string;
   systemPrompt: string;
-  capabilities: string[];
-  useCase: string;
   avatar: string;
   color: string;
 }
@@ -231,9 +180,18 @@ When analyzing GRC data, you produce comprehensive, professional reports that ma
 - Tailor depth of analysis to query complexity
 - For simple queries, provide concise but complete answers
 - For complex queries, deliver comprehensive analysis reports
-- Include metadata (data freshness, coverage, quality indicators)`,
-    capabilities: ['risk-analysis', 'compliance-audit', 'control-assessment', 'executive-reporting'],
-    useCase: 'comprehensive-grc-analysis',
+- Include metadata (data freshness, coverage, quality indicators)
+
+# DATA LISTING REQUIREMENTS
+
+**CRITICAL**: When listing applications, records, or any data collections:
+- **ALWAYS show ALL available items** - never truncate or limit to first 10, 20, or any subset
+- **NEVER use phrases like** "showing first X results", "top X items", or "sample of X"
+- **COMPLETE LISTINGS REQUIRED**: If the tool returns 141 applications, show all 141 applications
+- **For large datasets**: Use structured formatting (tables, numbered lists) but include every item
+- **Include questionnaires**: Applications listings must include both applications AND questionnaires
+- **If data is extensive**: Use clear grouping and categorization but maintain completeness
+- **Verify completeness**: Always cross-reference your output count with the tool's reported total`,
     avatar: '🛡️',
     color: '#2563eb'
   },
@@ -351,8 +309,6 @@ When analyzing GRC data, you produce comprehensive, professional reports that ma
 - Include industry-specific risk benchmarks
 - Highlight emerging risks and future trends
 - Recommend risk-adjusted decision criteria`,
-    capabilities: ['risk-analysis', 'anomaly-detection', 'trend-analysis'],
-    useCase: 'risk-management',
     avatar: '⚠️',
     color: '#dc2626'
   },
@@ -502,8 +458,6 @@ When analyzing GRC data, you produce comprehensive, professional reports that ma
 - Include risk of non-compliance (fines, sanctions)
 - Highlight positive compliance achievements
 - Maintain objective, evidence-based tone`,
-    capabilities: ['compliance-audit', 'control-assessment'],
-    useCase: 'compliance-monitoring',
     avatar: '📋',
     color: '#059669'
   },
@@ -667,8 +621,6 @@ For major decisions, provide:
 - Provide one-page summaries
 - Use charts over tables where possible
 - Include confidence levels for projections`,
-    capabilities: ['executive-reporting', 'trend-analysis', 'risk-analysis'],
-    useCase: 'executive-reporting',
     avatar: '👔',
     color: '#7c3aed'
   }

@@ -19,6 +19,7 @@ import {
   Zap
 } from 'lucide-react';
 import { useAuthStore } from '@/app/store/auth';
+import { NewLlmConfig as BackendNewLlmConfig } from '@/lib/backendLLMService';
 
 interface AddLlmConfigModalProps {
   isOpen: boolean;
@@ -39,6 +40,7 @@ export interface NewLlmConfig {
   customHeaders?: Record<string, string>;
   maxTokens: number;
   temperature: number;
+  rateLimit?: number; // Requests per minute - configurable rate limiting
   isEnabled: boolean;
   createdAt: string;
 }
@@ -103,7 +105,8 @@ export default function AddLlmConfigModal({
     apiKey: initialConfig?.apiKey || '',
     customHeaders: initialConfig?.customHeaders || {} as Record<string, string>,
     maxTokens: initialConfig?.maxTokens || 4000,
-    temperature: initialConfig?.temperature || 0.7
+    temperature: initialConfig?.temperature || 0.7,
+    rateLimit: initialConfig?.rateLimit || 15 // Default to 15 requests per minute
   });
   
   const [showApiKey, setShowApiKey] = useState(false);
@@ -193,6 +196,9 @@ export default function AddLlmConfigModal({
     }
     if (formData.temperature < 0 || formData.temperature > 2) {
       return 'Temperature must be between 0 and 2';
+    }
+    if (formData.rateLimit && (formData.rateLimit < 1 || formData.rateLimit > 1000)) {
+      return 'Rate limit must be between 1 and 1000 requests per minute';
     }
     return null;
   };
@@ -343,6 +349,7 @@ export default function AddLlmConfigModal({
         customHeaders: Object.keys(formData.customHeaders).length > 0 ? formData.customHeaders : undefined,
         maxTokens: formData.maxTokens,
         temperature: formData.temperature,
+        rateLimit: formData.rateLimit || undefined, // Include rate limit if specified
         isEnabled: editMode ? initialConfig!.isEnabled : true,
         createdAt: editMode ? initialConfig!.createdAt : new Date().toISOString()
       };
@@ -359,7 +366,8 @@ export default function AddLlmConfigModal({
         apiKey: '',
         customHeaders: {},
         maxTokens: 4000,
-        temperature: 0.7
+        temperature: 0.7,
+        rateLimit: 15
       });
       setHeaderPairs([]);
       setTestResult(null);
@@ -375,7 +383,7 @@ export default function AddLlmConfigModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[95vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center space-x-2">
             <Plus className="h-5 w-5 text-blue-600" />
@@ -383,7 +391,7 @@ export default function AddLlmConfigModal({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-8">
+        <div className="flex-1 overflow-y-auto space-y-6 px-2 py-2">
           {/* Progress Steps Indicator */}
           <div className="flex items-center justify-between px-4 py-3 bg-blue-50 rounded-lg border border-blue-100">
             <div className="flex items-center space-x-6">
@@ -428,7 +436,7 @@ export default function AddLlmConfigModal({
               </div>
             </div>
             
-            <div className="p-6 space-y-6">
+            <div className="p-4 space-y-4">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <Label htmlFor="llmName" className="text-sm font-medium text-gray-700">
@@ -499,7 +507,7 @@ export default function AddLlmConfigModal({
               </div>
             </div>
             
-            <div className="p-6 space-y-6">
+            <div className="p-4 space-y-4">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <Label htmlFor="model" className="text-sm font-medium text-gray-700">
@@ -613,11 +621,11 @@ export default function AddLlmConfigModal({
               </div>
             </div>
             
-            <div className="p-6 space-y-6">
+            <div className="p-4 space-y-4">
               {/* Model Parameters */}
               <div className="space-y-4">
                 <h4 className="font-medium text-gray-900 text-sm">Model Parameters</h4>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   <div className="space-y-2">
                     <Label htmlFor="maxTokens" className="text-sm font-medium text-gray-700">
                       Max Tokens
@@ -651,6 +659,24 @@ export default function AddLlmConfigModal({
                       className="h-11"
                     />
                     <p className="text-xs text-gray-500">Randomness of model responses (0=deterministic, 2=very random)</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="rateLimit" className="text-sm font-medium text-gray-700">
+                      Rate Limit (RPM)
+                    </Label>
+                    <Input
+                      id="rateLimit"
+                      type="number"
+                      value={formData.rateLimit}
+                      onChange={(e) => handleInputChange('rateLimit', parseInt(e.target.value) || 15)}
+                      min={1}
+                      max={1000}
+                      disabled={isSaving}
+                      className="h-11"
+                      placeholder="15"
+                    />
+                    <p className="text-xs text-gray-500">Requests per minute (1-1000). Leave empty for auto-detection</p>
                   </div>
                 </div>
               </div>
@@ -737,7 +763,7 @@ export default function AddLlmConfigModal({
               </div>
             </div>
             
-            <div className="p-6">
+            <div className="p-4">
               <div className="flex items-start justify-between p-4 bg-green-50 border border-green-200 rounded-lg">
                 <div className="flex-1">
                   <h4 className="font-medium text-green-900 text-sm mb-1">Connection Test</h4>
@@ -812,7 +838,7 @@ export default function AddLlmConfigModal({
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="flex-shrink-0 border-t border-gray-200 pt-4 mt-4 flex justify-end space-x-3">
           <Button variant="outline" onClick={onClose} disabled={isSaving}>
             Cancel
           </Button>

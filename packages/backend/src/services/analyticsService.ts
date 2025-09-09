@@ -9,8 +9,9 @@ import {
   AnalyticsQuery 
 } from '@/types/analytics';
 import { config } from '@/config';
-import { mcpClient } from './mcpClient';
+import { mcpClient, ArcherCredentials } from './mcpClient';
 import { archerDataTransformer } from './archerDataTransformer';
+import { DatabaseService } from './databaseService';
 
 /**
  * Analytics Service - Backend implementation
@@ -26,8 +27,73 @@ export class AnalyticsService {
     controlAnalytics: 2 * 60 * 1000 // 2 minutes - more responsive for testing
   };
 
+  private db: DatabaseService;
+
   constructor() {
     // Initialize service dependencies (Redis, Cosmos DB, etc.)
+    this.db = DatabaseService.getInstance();
+  }
+
+  /**
+   * Initialize MCP client with credentials from database
+   */
+  private async initializeMcpClientWithCredentials(tenantId: string): Promise<boolean> {
+    try {
+      // Get the default connection credential for this tenant
+      const credentialResult = await this.db.query(`
+        SELECT 
+          credential_id as id,
+          name,
+          base_url as baseUrl,
+          username,
+          encrypted_password,
+          instance_id as instanceId,
+          instance_name as instanceName,
+          user_domain_id as userDomainId,
+          is_default as isDefault,
+          created_at as created,
+          last_tested_at as lastTested,
+          test_status as status,
+          last_error as lastError
+        FROM connection_credentials 
+        WHERE tenant_id = ? AND is_default = 1 AND deleted_at IS NULL
+        LIMIT 1
+      `, [tenantId]);
+
+      if (credentialResult.length === 0) {
+        console.error(`[Analytics Service] No default credential found for tenant ${tenantId}`);
+        return false;
+      }
+
+      const credential = credentialResult[0];
+      
+      // Decrypt password (simple decryption - remove 'encrypted_' prefix)
+      const decryptedPassword = credential.encrypted_password?.replace('encrypted_', '') || '';
+      
+      const archerCredentials: ArcherCredentials = {
+        id: credential.id,
+        name: credential.name,
+        baseUrl: credential.baseUrl,
+        username: credential.username,
+        password: decryptedPassword, 
+        instanceId: credential.instanceId,
+        instanceName: credential.instanceName,
+        userDomainId: credential.userDomainId || '1',
+        isDefault: credential.isDefault === 1,
+        created: credential.created,
+        lastTested: credential.lastTested,
+        status: credential.status === 'success' ? 'connected' : 'disconnected',
+        lastError: credential.lastError
+      };
+
+      // Initialize the MCP client with these credentials
+      await mcpClient.initializeMCPConnection(archerCredentials);
+      console.log(`[Analytics Service] Successfully initialized MCP client for tenant ${tenantId}`);
+      return true;
+    } catch (error) {
+      console.error(`[Analytics Service] Failed to initialize MCP client for tenant ${tenantId}:`, error);
+      return false;
+    }
   }
 
   /**
@@ -45,6 +111,14 @@ export class AnalyticsService {
     // Create new operation promise
     const operationPromise = (async () => {
       try {
+        // Ensure MCP client is initialized before each operation
+        if (!mcpClient.connected) {
+          const initialized = await this.initializeMcpClientWithCredentials(tenantId);
+          if (!initialized) {
+            throw new Error('Failed to initialize MCP client with credentials');
+          }
+        }
+        
         const result = await operation();
         return result;
       } finally {

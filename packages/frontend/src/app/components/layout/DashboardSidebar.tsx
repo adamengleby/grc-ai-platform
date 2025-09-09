@@ -129,7 +129,7 @@ export const DashboardSidebar: React.FC = () => {
             <div className="flex items-center space-x-2">
               <Shield className="h-8 w-8 text-primary" />
               <div>
-                <h2 className="text-lg font-semibold">GRC Platform</h2>
+                <h2 className="text-lg font-semibold">RMX AI Hub</h2>
                 <p className="text-xs text-muted-foreground truncate">
                   {tenant.name}
                 </p>
@@ -186,7 +186,9 @@ export const DashboardSidebar: React.FC = () => {
                   }
                   title={sidebarCollapsed ? item.label : undefined}
                 >
-                  {item.icon}
+                  <div className={clsx(sidebarCollapsed && 'scale-125 transform')}>
+                    {item.icon}
+                  </div>
                   {!sidebarCollapsed && (
                     <>
                       <span className="flex-1">{item.label}</span>

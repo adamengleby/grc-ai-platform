@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent } from '../../../app/components/ui/Card';
 import { Badge } from '../../../app/components/ui/Badge';
 import { Button } from '../../../app/components/ui/Button';
+import { StatusBadge } from '../../../app/components/ui/StatusBadge';
+import { MetricsCard } from '../../../app/components/ui/MetricsCard';
+import { ProgressBar } from '../../../app/components/ui/ProgressBar';
 import {
   TrendingUp,
   Shield,
@@ -17,6 +20,7 @@ import {
 } from 'lucide-react';
 import { AIAgent } from '../../../types/agent';
 import { createAgentMetricsService, AgentMetrics } from '../../../lib/agentMetricsService';
+import { mcpConfigsManager } from '../../../lib/backendMcpConfigsApi';
 
 interface AgentCardProps {
   agent: AIAgent;
@@ -45,13 +49,20 @@ const AgentCard: React.FC<AgentCardProps> = ({
     recommendation: Brain
   };
 
-  // Determine agent type from use case or capabilities
+  // Determine agent type from use case, name, or description
   const getAgentType = (agent: AIAgent): keyof typeof agentIcons => {
-    const useCase = agent.useCase.toLowerCase();
-    if (useCase.includes('risk')) return 'risk';
-    if (useCase.includes('compliance')) return 'compliance';
-    if (useCase.includes('control')) return 'control';
-    if (useCase.includes('executive')) return 'executive';
+    const searchText = [
+      agent.name || '',
+      agent.description || '',
+      agent.persona || '',
+      // Safe access to useCase if it exists
+      (agent as any).useCase || ''
+    ].filter(Boolean).join(' ').toLowerCase();
+
+    if (searchText.includes('risk')) return 'risk';
+    if (searchText.includes('compliance')) return 'compliance';
+    if (searchText.includes('control')) return 'control';
+    if (searchText.includes('executive')) return 'executive';
     return 'recommendation';
   };
 
@@ -65,23 +76,43 @@ const AgentCard: React.FC<AgentCardProps> = ({
         const agentMetrics = metricsService.getAgentMetrics(agent.id);
         setMetrics(agentMetrics);
         
-        // Load MCP servers for this agent
-        const mcpStorageKey = `tenant_mcp_servers_${tenantId}`;
-        const allMcpServers = JSON.parse(localStorage.getItem(mcpStorageKey) || '[]');
-        const enabledMcpServers = allMcpServers.filter((server: any) => 
-          agent.enabledMcpServers.includes(server.id) && server.isEnabled
-        );
-        
-        // If no MCP servers are found but agent has enabledMcpServers, show default servers
-        if (enabledMcpServers.length === 0 && agent.enabledMcpServers.length > 0) {
-          const defaultServers = agent.enabledMcpServers.map(serverId => ({
-            id: serverId,
-            name: serverId === 'archer-grc' ? 'Archer GRC Server' : serverId.replace(/^mcp-/, '').replace(/-/g, ' '),
-            isEnabled: true
-          }));
-          setMcpServers(defaultServers);
+        // Load MCP servers for this agent from database
+        const enabledMcpServerIds = agent.enabledMcpServers || [];
+        if (enabledMcpServerIds.length > 0) {
+          try {
+            // Set tenant context for MCP configs API
+            mcpConfigsManager.setTenantContext(tenantId);
+            
+            // Get all MCP configurations from database
+            const allMcpConfigs = await mcpConfigsManager.getAllMcpConfigs();
+            
+            // Filter to only enabled servers that are in this agent's enabledMcpServers
+            const enabledMcpServers = allMcpConfigs
+              .filter(config => 
+                enabledMcpServerIds.includes(config.server_id) && config.is_enabled
+              )
+              .map(config => ({
+                id: config.server_id,
+                name: config.display_name || config.custom_name || config.server_name,
+                isEnabled: config.is_enabled
+              }));
+            
+            setMcpServers(enabledMcpServers);
+            console.log('✅ [AgentCard] Loaded MCP servers from database:', enabledMcpServers);
+          } catch (error) {
+            console.error('❌ [AgentCard] Failed to load MCP servers from database:', error);
+            // Fallback: show server IDs with friendly names
+            const fallbackServers = enabledMcpServerIds.map(serverId => ({
+              id: serverId,
+              name: serverId === 'archer-grc' ? 'Archer GRC Server' : 
+                    serverId === 'filesystem' ? 'File System' :
+                    serverId.replace(/^mcp-/, '').replace(/-/g, ' '),
+              isEnabled: true
+            }));
+            setMcpServers(fallbackServers);
+          }
         } else {
-          setMcpServers(enabledMcpServers);
+          setMcpServers([]);
         }
         
       } catch (error) {
@@ -96,7 +127,7 @@ const AgentCard: React.FC<AgentCardProps> = ({
     // Refresh data every 5 minutes for active agents
     const interval = setInterval(loadData, 300000);
     return () => clearInterval(interval);
-  }, [agent.id, tenantId, agent.enabledMcpServers]);
+  }, [agent.id, tenantId]);
 
   const formatLastExecution = (timestamp?: string): string => {
     if (!timestamp) return 'Never';
@@ -115,43 +146,31 @@ const AgentCard: React.FC<AgentCardProps> = ({
     return execTime.toLocaleDateString();
   };
 
-  const getStatusColor = (isEnabled: boolean) => {
-    return isEnabled ? 'bg-green-100 text-green-800 border-green-200' : 'bg-gray-100 text-gray-800 border-gray-200';
-  };
-
-  const getStatusIcon = (isEnabled: boolean) => {
-    return isEnabled ? (
-      <CheckCircle className="h-4 w-4" />
-    ) : (
-      <AlertCircle className="h-4 w-4" />
-    );
-  };
 
   const IconComponent = agentIcons[getAgentType(agent)];
 
   return (
-    <Card className="hover:shadow-md transition-shadow">
+    <Card variant="clean" className="hover:card-elevated transition-all duration-200">
       <CardContent className="p-6">
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center space-x-3">
-            <div className={`p-3 rounded-lg ${
-              agent.isEnabled ? 'bg-blue-100' : 'bg-gray-100'
+            <div className={`p-3 rounded-xl ${
+              agent.isEnabled ? 'bg-primary/10' : 'bg-muted'
             }`}>
               <IconComponent className={`h-6 w-6 ${
-                agent.isEnabled ? 'text-blue-600' : 'text-gray-400'
+                agent.isEnabled ? 'text-primary' : 'text-muted-foreground'
               }`} />
             </div>
             <div className="flex-1">
               <div className="flex items-center space-x-2 mb-1">
-                <h3 className="text-lg font-semibold text-gray-900">{agent.name}</h3>
-                <Badge variant="outline" className={getStatusColor(agent.isEnabled)}>
-                  {getStatusIcon(agent.isEnabled)}
-                  <span className="ml-1 capitalize">
-                    {agent.isEnabled ? 'Active' : 'Inactive'}
-                  </span>
-                </Badge>
+                <h3 className="text-lg font-semibold text-foreground">{agent.name}</h3>
+                <StatusBadge 
+                  status={agent.isEnabled ? 'good' : 'pending'}
+                  label={agent.isEnabled ? 'Active' : 'Inactive'}
+                  size="sm"
+                />
               </div>
-              <p className="text-sm text-gray-600">{agent.description}</p>
+              <p className="text-sm text-muted-foreground">{agent.description}</p>
             </div>
           </div>
         </div>
@@ -186,25 +205,33 @@ const AgentCard: React.FC<AgentCardProps> = ({
 
         {/* Performance Metrics */}
         {!isLoading && metrics && (
-          <div className="grid grid-cols-3 gap-4 text-center border-t pt-4 mb-4">
-            <div>
-              <p className="text-lg font-semibold text-gray-900">
-                {metrics.successRate}%
-              </p>
-              <p className="text-xs text-gray-500">Success Rate</p>
+          <div className="border-t pt-4 mb-4 space-y-3">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="text-center">
+                <div className="text-lg font-semibold text-foreground">
+                  {metrics.successRate}%
+                </div>
+                <div className="text-xs text-muted-foreground uppercase tracking-wider">Success Rate</div>
+              </div>
+              <div className="text-center">
+                <div className="text-lg font-semibold text-foreground">
+                  {metrics.totalExecutions}
+                </div>
+                <div className="text-xs text-muted-foreground uppercase tracking-wider">Executions</div>
+              </div>
+              <div className="text-center">
+                <div className="text-lg font-semibold text-foreground">
+                  {metrics.averageExecutionTime}s
+                </div>
+                <div className="text-xs text-muted-foreground uppercase tracking-wider">Avg Time</div>
+              </div>
             </div>
-            <div>
-              <p className="text-lg font-semibold text-gray-900">
-                {metrics.totalExecutions}
-              </p>
-              <p className="text-xs text-gray-500">Executions</p>
-            </div>
-            <div>
-              <p className="text-lg font-semibold text-gray-900">
-                {metrics.averageExecutionTime}s
-              </p>
-              <p className="text-xs text-gray-500">Avg Time</p>
-            </div>
+            <ProgressBar 
+              value={metrics.successRate} 
+              status={metrics.successRate >= 90 ? 'good' : metrics.successRate >= 70 ? 'medium' : 'critical'}
+              showLabel={false}
+              size="sm"
+            />
           </div>
         )}
 
@@ -227,7 +254,7 @@ const AgentCard: React.FC<AgentCardProps> = ({
 
         {/* Actions */}
         <div className="flex items-center justify-between">
-          <div className="text-sm text-gray-500 flex items-center space-x-1">
+          <div className="text-sm text-muted-foreground flex items-center space-x-1">
             <Clock className="h-3 w-3" />
             <span>Last execution: {formatLastExecution(metrics?.lastExecution)}</span>
           </div>
@@ -235,7 +262,10 @@ const AgentCard: React.FC<AgentCardProps> = ({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => onToggle(agent.id, !agent.isEnabled)}
+              onClick={() => {
+                console.log('[AgentCard] Toggle clicked - agent.id:', agent.id, 'agent:', agent);
+                onToggle(agent.id, !agent.isEnabled);
+              }}
               className="text-xs"
             >
               {agent.isEnabled ? (

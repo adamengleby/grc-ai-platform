@@ -5,24 +5,139 @@ import { agentConfigService } from '../services/agentConfigService';
 import { credentialsManager } from '../services/credentialsService';
 import { archerSessionService } from '../services/archerSessionService';
 
-// Simple privacy protection function
-function protectSensitiveData(data: any): any {
+// Privacy protection function that checks tenant settings
+async function protectSensitiveData(data: any, tenantId: string): Promise<any> {
+  console.log(`[Privacy] Checking privacy settings for tenant: ${tenantId}`);
+  console.log(`[Privacy DEBUG] Raw data received:`, JSON.stringify(data, null, 2));
+  
+  // Check if privacy protection is enabled for this tenant
+  try {
+    const privacyResponse = await fetch(`http://localhost:3005/api/v1/privacy/settings?scope=tenant&tenantId=${tenantId}`);
+    const privacySettings = await privacyResponse.json();
+    
+    console.log(`[Privacy] Settings retrieved:`, {
+      enabled: privacySettings.data?.enable_privacy_masking,
+      level: privacySettings.data?.masking_level
+    });
+    
+    // If privacy protection is disabled, return data unchanged
+    if (!privacySettings.success || !privacySettings.data?.enable_privacy_masking) {
+      console.log(`[Privacy] Privacy protection disabled, returning raw data`);
+      return data;
+    }
+    
+    const maskingLevel = privacySettings.data.masking_level || 'moderate';
+    console.log(`[Privacy] Applying ${maskingLevel} level masking...`);
+    
+    const maskedData = applyPrivacyMasking(data, maskingLevel);
+    console.log(`[Privacy DEBUG] Data after masking:`, JSON.stringify(maskedData, null, 2));
+    console.log(`[Privacy] Masking applied successfully`);
+    return maskedData;
+  } catch (error) {
+    console.error('[Privacy] Error checking privacy settings:', error);
+    // On error, apply moderate masking as default for safety
+    console.log(`[Privacy] Error occurred, applying moderate masking as fallback`);
+    return applyPrivacyMasking(data, 'moderate');
+  }
+}
+
+// Apply privacy masking based on level
+function applyPrivacyMasking(data: any, maskingLevel: string): any {
+  console.log(`[Privacy DEBUG] Processing item of type: ${typeof data}, masking level: ${maskingLevel}`);
+  
   if (typeof data === 'string') {
-    // Only mask obvious personal data - be more conservative
-    // Check if it's an email
-    if (/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/.test(data)) {
+    console.log(`[Privacy DEBUG] Processing string: "${data.substring(0, 100)}${data.length > 100 ? '...' : ''}"`);
+    
+    let processedData = data;
+    
+    // Always mask emails and phone numbers regardless of level
+    processedData = processedData.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, (match) => {
+      console.log(`[Privacy DEBUG] Masking email: "${match}"`);
       return '[MASKED_EMAIL]';
-    }
-    // Check if it's a phone number
-    if (/(\+?\d{1,3}[-.\\s]?)?\(?\d{3}\)?[-.\\s]?\d{3}[-.\\s]?\d{4}/.test(data)) {
+    });
+    
+    processedData = processedData.replace(/(\+?\d{1,3}[-.\\s]?)?\(?\d{3}\)?[-.\\s]?\d{3}[-.\\s]?\d{4}/g, (match) => {
+      console.log(`[Privacy DEBUG] Masking phone: "${match}"`);
       return '[MASKED_PHONE]';
+    });
+    
+    // Mask names based on patterns - search within text blocks
+    if (maskingLevel === 'moderate' || maskingLevel === 'strict') {
+      console.log(`[Privacy DEBUG] Searching for names in text block`);
+      
+      // Look for "Action_Assignee: LastName, FirstName" patterns in the text
+      processedData = processedData.replace(/Action_Assignee:\s*([A-Z][a-z]{1,15},\s*[A-Z][a-z]{1,15})/g, (match, name) => {
+        console.log(`[Privacy DEBUG] FOUND Action_Assignee name: "${name}" -> [MASKED_NAME]`);
+        return match.replace(name, '[MASKED_NAME]');
+      });
+      
+      // Also look for standalone name patterns that might appear elsewhere
+      const namePatterns = [
+        { name: 'LastName_FirstName', regex: /\b[A-Z][a-z]{1,15},\s*[A-Z][a-z]{1,15}\b/g }, // "Aliferis, Suzy"
+        { name: 'FirstName_LastName', regex: /\b[A-Z][a-z]{1,15}\s+[A-Z][a-z]{1,15}\b/g }, // "John Smith"
+      ];
+      
+      // Common words that are NOT names but might match patterns
+      const nonNameWords = [
+        // Time/date words
+        'January', 'February', 'March', 'April', 'May', 'June', 
+        'July', 'August', 'September', 'October', 'November', 'December',
+        'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
+        
+        // Business terms
+        'Service', 'Credits', 'Report', 'Letter', 'Weekly', 'Monthly', 'Annual',
+        'Investment', 'Member', 'Staff', 'Employee', 'Contact', 'Details',
+        'Executive', 'Business', 'Unit', 'Department', 'Division', 'Account',
+        'Premium', 'Processing', 'Management', 'Feedback', 'System', 'Access',
+        'Risk', 'Register', 'Control', 'Policy', 'Policies', 'Issue', 'Issues',
+        'Task', 'Tasks', 'Incident', 'Incidents', 'Application', 'Applications',
+        
+        // Common adjectives/descriptors
+        'Active', 'Inactive', 'High', 'Medium', 'Low', 'New', 'Old', 'Recent',
+        'Current', 'Previous', 'Next', 'Final', 'Initial', 'Primary', 'Secondary',
+        
+        // Technical terms
+        'Record', 'Field', 'Type', 'Data', 'Action', 'Summary', 'Response', 'Request'
+      ];
+      
+      for (const pattern of namePatterns) {
+        processedData = processedData.replace(pattern.regex, (match) => {
+          // Check if either word in the match is a common non-name word
+          const words = match.split(/[\s,]+/).filter(w => w.length > 0);
+          const isNonName = words.some(word => 
+            nonNameWords.some(nonName => word.toLowerCase() === nonName.toLowerCase())
+          );
+          
+          if (isNonName) {
+            console.log(`[Privacy DEBUG] SKIPPING non-name phrase: "${match}"`);
+            return match;
+          }
+          
+          // Additional checks for business terms
+          if (match.toLowerCase().includes('service') || match.toLowerCase().includes('credit') ||
+              match.toLowerCase().includes('report') || match.toLowerCase().includes('letter') ||
+              match.toLowerCase().includes('system') || match.toLowerCase().includes('account')) {
+            console.log(`[Privacy DEBUG] SKIPPING business term: "${match}"`);
+            return match;
+          }
+          
+          console.log(`[Privacy DEBUG] MATCHED ${pattern.name} in text: "${match}" -> [MASKED_NAME]`);
+          return '[MASKED_NAME]';
+        });
+      }
     }
-    // Only mask names in very specific contexts (not generic "name" fields)
-    return data;
+    
+    if (processedData !== data) {
+      console.log(`[Privacy DEBUG] Text was modified by masking`);
+    } else {
+      console.log(`[Privacy DEBUG] No sensitive patterns found in text`);
+    }
+    
+    return processedData;
   }
   
   if (Array.isArray(data)) {
-    return data.map(item => protectSensitiveData(item));
+    return data.map(item => applyPrivacyMasking(item, maskingLevel));
   }
   
   if (typeof data === 'object' && data !== null) {
@@ -30,28 +145,113 @@ function protectSensitiveData(data: any): any {
     for (const [key, value] of Object.entries(data)) {
       const lowerKey = key.toLowerCase();
       
-      // ONLY mask fields that are clearly personal identifiable information
-      if (lowerKey.includes('email') || lowerKey.includes('phone') ||
-          lowerKey.includes('personal_email') || lowerKey.includes('mobile') ||
-          lowerKey.includes('home_phone') || lowerKey.includes('cell')) {
-        protected_data[key] = protectSensitiveData(value);
-      }
-      // ONLY mask personal names in clearly personal contexts 
-      else if (lowerKey.includes('employee_name') || lowerKey.includes('person_name') ||
-               lowerKey.includes('individual_name') || lowerKey.includes('full_name')) {
-        // Only mask if it looks like a personal name
-        if (typeof value === 'string' && /^[A-Z][a-z]+([,\s]+[A-Z][a-z]+)+$/.test(value.trim())) {
-          protected_data[key] = '[MASKED_NAME]';
-        } else {
-          protected_data[key] = value;
-        }
-      }
-      // PRESERVE everything else - including application names, owner fields, etc.
-      else {
-        protected_data[key] = protectSensitiveData(value);
-      }
+      // Always recursively process ALL values, including strings
+      protected_data[key] = applyPrivacyMasking(value, maskingLevel);
     }
     return protected_data;
+  }
+  
+  return data;
+}
+
+/**
+ * Validate source fields to prevent LLM hallucination of non-existent columns
+ * Ensures only actual fields from Archer source data are included in responses
+ */
+function validateSourceFields(data: any, toolName: string): any {
+  console.log(`[Field Validation] Validating fields for tool: ${toolName}`);
+  
+  // Define known field schemas for different Archer applications/tools
+  const KNOWN_FIELD_SCHEMAS: Record<string, string[]> = {
+    'search_archer_records': [
+      'Record ID', 'Action ID', 'Related Ticket Summary', 'Action Assignee', 
+      'Action Response', 'Title', 'Description', 'Status', 'Priority',
+      'Created Date', 'Modified Date', 'Owner', 'Category', 'Type',
+      'Business Unit', 'Region', 'Severity', 'Impact', 'Likelihood'
+    ],
+    'get_actions': [
+      'Record ID', 'Action ID', 'Related Ticket Summary', 'Action Assignee',
+      'Action Response', 'Title', 'Description', 'Status', 'Priority',
+      'Created Date', 'Modified Date', 'Owner', 'Assigned To'
+    ],
+    'get_risks': [
+      'Record ID', 'Risk', 'Category', 'Business Unit', 'Owner', 
+      'Risk Rating', 'Likelihood', 'Impact', 'Status', 'Created Date'
+    ],
+    'get_controls': [
+      'Record ID', 'Control', 'Category', 'Owner', 'Status', 'Effectiveness',
+      'Control Type', 'Frequency', 'Created Date', 'Modified Date'
+    ],
+    // Add more tool schemas as needed
+    'default': [
+      'Record ID', 'Title', 'Description', 'Status', 'Owner', 
+      'Created Date', 'Modified Date', 'Category', 'Priority'
+    ]
+  };
+  
+  // Get the allowed fields for this tool
+  const allowedFields = KNOWN_FIELD_SCHEMAS[toolName] || KNOWN_FIELD_SCHEMAS['default'];
+  console.log(`[Field Validation] Allowed fields for ${toolName}:`, allowedFields);
+  
+  return filterValidFields(data, allowedFields, toolName);
+}
+
+/**
+ * Recursively filter data to only include valid fields
+ */
+function filterValidFields(data: any, allowedFields: string[], toolName: string): any {
+  if (typeof data === 'string') {
+    // For text responses, add a metadata note about validated fields
+    return data + `\n\n[System Note: Response validated to include only actual source fields for ${toolName}]`;
+  }
+  
+  if (Array.isArray(data)) {
+    return data.map(item => filterValidFields(item, allowedFields, toolName));
+  }
+  
+  if (typeof data === 'object' && data !== null) {
+    const filtered: any = {};
+    
+    // Handle nested objects and arrays
+    for (const [key, value] of Object.entries(data)) {
+      // Special handling for known response structures
+      if (key === 'content' && Array.isArray(value)) {
+        // Filter content array items (like MCP text responses)
+        filtered[key] = value.map(item => {
+          if (item?.type === 'text' && item?.text) {
+            return {
+              ...item,
+              text: filterValidFields(item.text, allowedFields, toolName)
+            };
+          }
+          return item;
+        });
+      } else if (key === 'Records' && Array.isArray(value)) {
+        // Filter Archer records to only include valid fields
+        filtered[key] = value.map(record => {
+          const validRecord: any = {};
+          for (const [recordKey, recordValue] of Object.entries(record)) {
+            // Only include fields that are in the allowed list
+            if (allowedFields.some(field => 
+              field.toLowerCase() === recordKey.toLowerCase() ||
+              recordKey.toLowerCase().includes(field.toLowerCase()) ||
+              field.toLowerCase().includes(recordKey.toLowerCase())
+            )) {
+              validRecord[recordKey] = recordValue;
+              console.log(`[Field Validation] ✓ Keeping valid field: ${recordKey}`);
+            } else {
+              console.log(`[Field Validation] ✗ Filtering out invalid field: ${recordKey}`);
+            }
+          }
+          return validRecord;
+        });
+      } else {
+        // Recursively filter nested objects
+        filtered[key] = filterValidFields(value, allowedFields, toolName);
+      }
+    }
+    
+    return filtered;
   }
   
   return data;
@@ -585,12 +785,16 @@ mcpRouter.post('/call', async (req, res) => {
       });
     }
 
-    // TEMPORARILY DISABLE privacy protection to troubleshoot data protection error
-    // const protectedResult = protectSensitiveData(executionResult);
+    // Apply privacy protection based on tenant settings
+    const protectedResult = await protectSensitiveData(executionResult, tenantId);
+
+    // Apply field validation to prevent LLM hallucination of non-existent fields
+    // TODO: Re-enable field validation once implementation is stable
+    const validatedResult = protectedResult; // validateSourceFields(protectedResult, toolName);
 
     return res.json({
       success: true,
-      result: executionResult, // Return raw data to troubleshoot
+      result: validatedResult,
       toolName,
       agentId,
       serverId: 'http-wrapper',

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { ArcherConnectionTester } from '../services/connectionTesters/archerTester';
 import { SqlServerConnectionTester } from '../services/connectionTesters/sqlServerTester';
 import { RestApiConnectionTester } from '../services/connectionTesters/restApiTester';
+import { DatabaseService } from '../services/databaseService';
 
 export const connectionTestRouter = Router();
 
@@ -11,21 +12,50 @@ export const connectionTestRouter = Router();
  */
 connectionTestRouter.post('/test/archer', async (req, res) => {
   try {
-    const { baseUrl, username, password, instanceId, userDomainId = "1" } = req.body;
+    let { baseUrl, username, password, instanceId, userDomainId = null, connectionId } = req.body;
     const tenantId = req.headers['x-tenant-id'] as string;
+    
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Tenant ID required in x-tenant-id header'
+      });
+    }
+
+    // If connectionId is provided, load credentials from database
+    if (connectionId) {
+      console.log(`[Connection Test] Loading credentials from database for connection ${connectionId}`);
+      const db = DatabaseService.getInstance();
+      
+      const credentials = await db.query(`
+        SELECT credential_id, name, base_url, username, encrypted_password, instance_id, user_domain_id
+        FROM connection_credentials 
+        WHERE tenant_id = ? AND credential_id = ? AND is_enabled = 1
+      `, [tenantId, connectionId]);
+      
+      if (credentials.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'Connection not found or disabled'
+        });
+      }
+      
+      const cred = credentials[0];
+      // Override with database values and decrypt password
+      baseUrl = cred.base_url;
+      username = cred.username;
+      password = cred.encrypted_password.replace('encrypted_', ''); // Simple decryption
+      instanceId = cred.instance_id;
+      userDomainId = cred.user_domain_id || null;
+      
+      console.log(`[Connection Test] Loaded credentials from database for connection ${connectionId}`);
+    }
     
     // Input validation
     if (!baseUrl || !username || !password || !instanceId) {
       return res.status(400).json({
         success: false,
         error: 'Missing required Archer connection parameters: baseUrl, username, password, instanceId'
-      });
-    }
-
-    if (!tenantId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Tenant ID required in x-tenant-id header'
       });
     }
 
@@ -40,6 +70,29 @@ connectionTestRouter.post('/test/archer', async (req, res) => {
       instanceId,
       userDomainId
     });
+
+    // Update database with test results if connectionId was provided
+    if (connectionId) {
+      try {
+        const db = DatabaseService.getInstance();
+        await db.execute(`
+          UPDATE connection_credentials 
+          SET test_status = ?, last_error = ?, last_tested_at = ?, updated_at = ?
+          WHERE credential_id = ? AND tenant_id = ?
+        `, [
+          result.success ? 'success' : 'failed',
+          result.success ? null : JSON.stringify(result.error || result.message),
+          new Date().toISOString(),
+          new Date().toISOString(),
+          connectionId,
+          tenantId
+        ]);
+        console.log(`[Connection Test] Updated database status for connection ${connectionId}: ${result.success ? 'success' : 'failed'}`);
+      } catch (dbError) {
+        console.error('[Connection Test] Failed to update database status:', dbError);
+        // Don't fail the response if database update fails
+      }
+    }
 
     return res.json({
       success: result.success,

@@ -14,13 +14,20 @@ import {
   AlertCircle,
   Sparkles,
   MessageSquare,
+  Activity,
+  Wifi,
+  WifiOff,
+  Zap,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { createMcpService } from '@/lib/mcpService';
 import { TenantSelector, McpTenant } from './TenantSelector';
-import { createAgentService } from '@/lib/agentService';
+import { createAgentService } from '@/lib/backendAgentService';
 import { AIAgent } from '@/types/agent';
 import { securityAuditLogger } from '@/lib/security/auditLogger';
+import { useMCPSSE } from '@/hooks/useMCPSSE';
+import { MCPToolProgressList } from '@/components/ui/MCPToolProgress';
+import { MCPSSEDemo } from '@/components/demo/MCPSSEDemo';
 // import { enhancedSessionValidator } from '@/lib/security/sessionValidator';
 
 /**
@@ -60,7 +67,7 @@ async function orchestrateWithAzureOpenAI(
       console.log('[MCP Direct] Using tool:', defaultTool);
       
       try {
-        const workingTenantId = tenant?.id || selectedTenant?.id || 'tenant-acme'; // Use actual tenant
+        const workingTenantId = tenant?.id || selectedTenant?.id || 'A1B2C3D4-E5F6-7G8H-9I0J-K1L2M3N4O5P6'; // Use actual tenant
         
         const result = await mcpService.executeTool({
           toolId: defaultTool,
@@ -192,7 +199,7 @@ async function orchestrateWithAzureOpenAI(
         });
 
         // For testing, use a known working tenant ID
-        const workingTenantId = tenant?.id || selectedTenant?.id || 'tenant-acme'; // Use actual tenant
+        const workingTenantId = tenant?.id || selectedTenant?.id || 'A1B2C3D4-E5F6-7G8H-9I0J-K1L2M3N4O5P6'; // Use actual tenant
         
         const result = await mcpService.executeTool({
           toolId: defaultTool,
@@ -662,6 +669,16 @@ export const McpTestInterface: React.FC = () => {
   const [conversationId, setConversationId] = useState<string>(() => 
     `conversation-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
   );
+  const [showSSEDemo, setShowSSEDemo] = useState(false);
+
+  // MCP SSE Integration
+  const {
+    isConnected: mcpConnected,
+    connectionError: mcpConnectionError,
+    activeCalls: activeMCPTools,
+    callTool: callMCPTool,
+    sessionInfo: mcpSessionInfo
+  } = useMCPSSE();
 
   // Auto-scroll to bottom when new messages are added
   useEffect(() => {
@@ -835,7 +852,7 @@ export const McpTestInterface: React.FC = () => {
         const userTenant = selectedTenant?.id || tenant.id;
         const isPlatformOwner = user.roles.includes('PlatformOwner');
         const hasAccess = isPlatformOwner || userTenant === parsed.tenantId || 
-                         userTenant.includes('manufacturing') && parsed.tenantId === 'tenant-acme';
+                         userTenant.includes('manufacturing') && parsed.tenantId === 'A1B2C3D4-E5F6-7G8H-9I0J-K1L2M3N4O5P6';
         
         if (!hasAccess) {
           const errorMessage: ConversationMessage = {
@@ -1077,7 +1094,7 @@ How can I assist you today?`,
       }
       
       try {
-        const workingTenantId = tenant?.id || selectedTenant?.id || 'tenant-acme'; // Use actual tenant
+        const workingTenantId = tenant?.id || selectedTenant?.id || 'A1B2C3D4-E5F6-7G8H-9I0J-K1L2M3N4O5P6'; // Use actual tenant
         
         // Prepare inputs based on selected tool
         let toolInputs: any = {
@@ -1209,15 +1226,83 @@ ${errorMessage}${suggestedActions}
 
   return (
     <div className="h-full flex flex-col space-y-4">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">GRC AI Assistant</h1>
-        <p className="text-muted-foreground">
-          Ask questions about compliance, risk, and governance using your tenant-scoped MCP tools
-        </p>
+      {/* Header with Tabs */}
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-2xl font-bold">GRC AI Assistant</h1>
+          <p className="text-muted-foreground">
+            Ask questions about compliance, risk, and governance using your tenant-scoped MCP tools
+          </p>
+        </div>
+        
+        {/* Tab Navigation */}
+        <div className="border-b border-gray-200">
+          <nav className="-mb-px flex space-x-8">
+            <button
+              onClick={() => setShowSSEDemo(false)}
+              className={clsx(
+                'whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm',
+                !showSSEDemo
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              )}
+            >
+              <div className="flex items-center space-x-2">
+                <MessageSquare className="h-4 w-4" />
+                <span>AI Chat</span>
+              </div>
+            </button>
+            
+            <button
+              onClick={() => setShowSSEDemo(true)}
+              className={clsx(
+                'whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm',
+                showSSEDemo
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              )}
+            >
+              <div className="flex items-center space-x-2">
+                <Zap className="h-4 w-4" />
+                <span>SSE Streaming Demo</span>
+                {mcpConnected && (
+                  <Wifi className="h-3 w-3 text-green-500" />
+                )}
+                {activeMCPTools.length > 0 && (
+                  <div className="bg-orange-500 text-white rounded-full text-xs px-1.5 py-0.5 min-w-[1.5rem] h-5 flex items-center justify-center">
+                    {activeMCPTools.length}
+                  </div>
+                )}
+              </div>
+            </button>
+          </nav>
+        </div>
       </div>
 
-      <div className="flex-1 grid grid-cols-12 gap-4 min-h-0">
+      {/* Tab Content */}
+      {showSSEDemo ? (
+        /* SSE Demo Tab */
+        <div className="flex-1">
+          <MCPSSEDemo 
+            className="h-full"
+            onResult={(tool, result) => {
+              // Add tool results to conversation history
+              const newMessage = {
+                id: `sse-${Date.now()}`,
+                type: 'assistant' as const,
+                content: `**Tool**: ${tool}\n\n**Result**:\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``,
+                timestamp: new Date().toISOString(),
+                confidence: 1.0,
+                toolsUsed: [tool]
+              };
+              
+              setConversationHistory(prev => [...prev, newMessage]);
+            }}
+          />
+        </div>
+      ) : (
+        /* Original Chat Interface */
+        <div className="flex-1 grid grid-cols-12 gap-4 min-h-0">
         {/* Tenant Selection Sidebar */}
         <div className="col-span-3">
           <div className="space-y-4">
@@ -1398,9 +1483,9 @@ ${errorMessage}${suggestedActions}
                           <span className="text-xs font-medium">Tools Used:</span>
                         </div>
                         <div className="flex flex-wrap gap-1">
-                          {message.toolsUsed.map((tool) => (
+                          {message.toolsUsed.map((tool, index) => (
                             <span
-                              key={tool}
+                              key={`${message.id}-${tool}-${index}`}
                               className="px-2 py-1 bg-background/50 rounded text-xs flex items-center space-x-1"
                             >
                               {tool === 'archer-connector' && <Database className="h-3 w-3" />}
@@ -1560,6 +1645,7 @@ ${errorMessage}${suggestedActions}
           </Card>
         </div>
       </div>
+      )}
     </div>
   );
 };

@@ -19,7 +19,7 @@ import {
   Settings,
   FileText
 } from 'lucide-react';
-import { ArcherCredentials, getAllCredentials, credentialsManager } from '@/lib/credentialsApi';
+import { ArcherCredentials, getAllCredentials, credentialsManager } from '@/lib/backendCredentialsApi';
 import { useAuthStore } from '@/app/store/auth';
 
 interface AddMcpServerModalProps {
@@ -126,18 +126,17 @@ export default function AddMcpServerModal({
     setMessage({ type: 'info', text: `Testing connection to ${formData.name}...` });
 
     try {
-      // Simulate testing the MCP server endpoint
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
       // Test the MCP server endpoints specifically
       const healthResponse = await fetch(`${formData.endpoint}/health`, {
         method: 'GET',
-        headers: { 'Accept': 'application/json' }
+        headers: { 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(10000) // 10 second timeout
       }).catch(() => null);
 
       const toolsResponse = await fetch(`${formData.endpoint}/tools`, {
         method: 'GET', 
-        headers: { 'Accept': 'application/json' }
+        headers: { 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(10000) // 10 second timeout
       }).catch(() => null);
 
       if (healthResponse && healthResponse.ok && toolsResponse && toolsResponse.ok) {
@@ -389,17 +388,6 @@ export default function AddMcpServerModal({
                         </option>
                       ))}
                     </select>
-                    {selectedConnection && (
-                      <div className="flex items-center space-x-2 mt-2 p-3 bg-gray-50 rounded-lg">
-                        <Database className="h-4 w-4 text-gray-500" />
-                        <span className="text-sm text-gray-600">
-                          Will use connection: <strong>{selectedConnection.name}</strong>
-                        </span>
-                        <Badge variant={selectedConnection.status === 'connected' ? 'default' : 'secondary'}>
-                          {selectedConnection.status}
-                        </Badge>
-                      </div>
-                    )}
                     <p className="text-xs text-gray-500">External connection credentials will be securely passed to the MCP server</p>
                   </div>
                 )}

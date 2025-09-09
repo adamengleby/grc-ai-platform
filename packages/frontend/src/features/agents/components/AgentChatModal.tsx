@@ -18,13 +18,16 @@ import {
   Minimize2,
   Maximize2,
   Settings,
-  MessageSquare
+  Activity,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 import { AIAgent } from '@/types/agent';
-import { createAgentService } from '@/lib/agentService';
+import { createAgentService } from '@/lib/backendAgentService';
 import { createLLMService, LLMResponse, LLMMessage } from '@/lib/llmService';
-import { useAuthStore } from '@/app/store/auth';
-import { credentialsManager, type ArcherCredentials } from '@/lib/credentialsApi';
+import { credentialsManager, type ArcherCredentials } from '@/lib/backendCredentialsApi';
+import { useMCPSSE } from '@/hooks/useMCPSSE';
+import { MCPToolProgressList } from '@/components/ui/MCPToolProgress';
 import { clsx } from 'clsx';
 
 interface ChatMessage {
@@ -50,17 +53,19 @@ interface AgentChatModalProps {
   isOpen: boolean;
   onClose: () => void;
   agent: AIAgent;
+  tenantId: string;
 }
 
 export const AgentChatModal: React.FC<AgentChatModalProps> = ({
   isOpen,
   onClose,
-  agent
+  agent,
+  tenantId
 }) => {
-  const { tenant } = useAuthStore();
+  console.log(`[AgentChatModal] 🏁 COMPONENT RENDER - isOpen: ${isOpen}, agent: ${agent?.name}, tenantId: ${tenantId}`);
   
   // Chat state management
-  const getChatStorageKey = () => `agent_chat_${tenant?.id}_${agent.id}`;
+  const getChatStorageKey = () => `agent_chat_${tenantId}_${agent.id}`;
   
   const loadPersistedMessages = (): ChatMessage[] => {
     try {
@@ -103,58 +108,92 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
   const [isInitialized, setIsInitialized] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
 
+  // MCP SSE Integration for real-time tool progress
+  const {
+    isConnected: mcpConnected,
+    connectionError: mcpConnectionError,
+    activeCalls: activeMCPTools,
+    callTool: callMCPTool,
+    sessionInfo: mcpSessionInfo
+  } = useMCPSSE();
+
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Track which agent is currently initialized to prevent re-initialization
+  const initializedAgentRef = useRef<string | null>(null);
+
   // Initialize agent connection when modal opens
   useEffect(() => {
+    console.log(`[AgentChatModal] 🔍 useEffect triggered - isOpen: ${isOpen}, agentId: ${agent?.id}, tenantId: ${tenantId}, initializedAgent: ${initializedAgentRef.current}`);
+    
     const initializeAgentConnection = async () => {
-      if (!isOpen || !agent || !tenant?.id || isInitialized) return;
+      if (!isOpen || !agent || !tenantId || initializedAgentRef.current === agent.id) {
+        console.log(`[AgentChatModal] ⏭️ Skipping initialization - isOpen: ${isOpen}, hasAgent: ${!!agent}, hasTenant: ${!!tenantId}, alreadyInitialized: ${initializedAgentRef.current === agent?.id}`);
+        return;
+      }
 
       try {
-        console.log(`[AgentChatModal] Initializing chat for agent: ${agent.name} (${agent.id})`);
+        console.log(`[AgentChatModal] 🚀 INITIALIZING CHAT for agent: ${agent.name} (${agent.id})`);
+        console.log(`[AgentChatModal] Tenant ID: ${tenantId}`);
+        console.log(`[AgentChatModal] Agent object:`, agent);
         
         // Set tenant context for credentials manager
-        credentialsManager.setTenantContext(tenant.id);
+        console.log(`[AgentChatModal] 🔐 Setting tenant context for credentials manager`);
+        credentialsManager.setTenantContext(tenantId);
         await credentialsManager.initialize();
+        console.log(`[AgentChatModal] ✅ Credentials manager initialized`);
 
         // Get agent with full context (LLM config, MCP servers)
-        const agentService = createAgentService(tenant.id);
+        console.log(`[AgentChatModal] 🧠 Creating agent service for tenant: ${tenantId}`);
+        const agentService = createAgentService(tenantId);
+        
+        console.log(`[AgentChatModal] 📋 Loading agent context for agent ID: ${agent.id}`);
         const agentContext = await agentService.getAgentWithContext(agent.id);
+        console.log(`[AgentChatModal] Agent context loaded:`, agentContext);
         
         if (!agentContext) {
+          console.error(`[AgentChatModal] ❌ Failed to load agent configuration for ${agent.id}`);
           throw new Error('Failed to load agent configuration');
         }
 
+        console.log(`[AgentChatModal] 🔍 Checking LLM config:`, agentContext.llmConfig);
         if (!agentContext.llmConfig) {
+          console.error(`[AgentChatModal] ❌ No LLM configuration found for agent ${agent.id}`);
           throw new Error('No LLM configuration found for this agent. Please configure an LLM in Settings.');
         }
 
         if (!agentContext.llmConfig.isEnabled) {
+          console.error(`[AgentChatModal] ❌ LLM configuration is disabled for agent ${agent.id}:`, agentContext.llmConfig);
           throw new Error('LLM configuration is disabled. Please enable it in Settings.');
         }
+        console.log(`[AgentChatModal] ✅ LLM configuration is valid and enabled`);
         
         // Load Archer connections
+        console.log(`[AgentChatModal] 🔌 Loading Archer connections`);
         let archerConnections: ArcherCredentials[] = [];
         let selectedConnection: ArcherCredentials | null = null;
         
         try {
           archerConnections = await credentialsManager.loadCredentials();
+          console.log(`[AgentChatModal] Found ${archerConnections.length} Archer connections:`, archerConnections.map(c => ({ id: c.id, name: c.name, isDefault: c.isDefault })));
           selectedConnection = archerConnections.find(conn => conn.isDefault) || archerConnections[0] || null;
+          console.log(`[AgentChatModal] Selected connection:`, selectedConnection ? { id: selectedConnection.id, name: selectedConnection.name } : 'None');
         } catch (err) {
-          console.error('Failed to load Archer credentials:', err);
+          console.error('[AgentChatModal] ❌ Failed to load Archer credentials:', err);
         }
 
         // Log agent's MCP server configuration
-        console.log(`[AgentChatModal] Agent ${agent.id} MCP servers:`, agentContext.mcpServers?.length || 0);
+        console.log(`[AgentChatModal] 🛠️  Agent ${agent.id} MCP servers:`, agentContext.mcpServers?.length || 0);
         if (agentContext.mcpServers && agentContext.mcpServers.length > 0) {
-          console.log('[AgentChatModal] Configured MCP servers:', 
+          console.log('[AgentChatModal] ✅ Configured MCP servers:', 
             agentContext.mcpServers.map(s => ({ id: s.id, name: s.name })));
         } else {
-          console.warn(`[AgentChatModal] No MCP servers configured for agent ${agent.id}`);
+          console.warn(`[AgentChatModal] ⚠️  No MCP servers configured for agent ${agent.id}`);
         }
         
+        console.log(`[AgentChatModal] 💾 Setting connection status`);
         setConnectionStatus({
           isConnected: true,
           lastChecked: new Date(),
@@ -165,7 +204,9 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
         });
         
         // Load existing messages or create welcome message
+        console.log(`[AgentChatModal] 💬 Loading chat messages`);
         const existingMessages = loadPersistedMessages();
+        console.log(`[AgentChatModal] Found ${existingMessages.length} existing messages`);
         
         if (existingMessages.length === 0) {
           const welcomeMessage: ChatMessage = {
@@ -191,12 +232,20 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
           setConversationHistory(history);
         }
         
+        console.log(`[AgentChatModal] ✅ CHAT INITIALIZATION COMPLETE`);
         setIsInitialized(true);
+        initializedAgentRef.current = agent.id;
         setError(null);
         
       } catch (err) {
-        console.error('Failed to initialize agent connection:', err);
+        console.error('[AgentChatModal] ❌ FAILED TO INITIALIZE AGENT CONNECTION:', err);
         const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+        console.error('[AgentChatModal] Error details:', {
+          error: err,
+          stack: err instanceof Error ? err.stack : 'No stack trace',
+          agentId: agent.id,
+          tenantId: tenantId
+        });
         setError(`Failed to initialize agent: ${errorMessage}`);
         setConnectionStatus({
           isConnected: false,
@@ -209,10 +258,10 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
       }
     };
 
-    if (isOpen && agent && tenant?.id) {
+    if (isOpen && agent && tenantId) {
       initializeAgentConnection();
     }
-  }, [isOpen, agent, tenant?.id]);
+  }, [isOpen]);
 
   // Save messages to storage whenever messages change
   useEffect(() => {
@@ -242,6 +291,7 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
   useEffect(() => {
     if (!isOpen) {
       setIsInitialized(false);
+      initializedAgentRef.current = null;
       setError(null);
       setIsLoading(false);
     }
@@ -249,8 +299,21 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
 
   // Handle sending messages
   const handleSendMessage = useCallback(async () => {
-    if (!inputMessage.trim() || isLoading || !connectionStatus.isConnected) return;
+    console.log(`[AgentChatModal] 📤 handleSendMessage called`);
+    console.log(`[AgentChatModal] Input message: "${inputMessage}"`);
+    console.log(`[AgentChatModal] Is loading: ${isLoading}`);
+    console.log(`[AgentChatModal] Is connected: ${connectionStatus.isConnected}`);
+    
+    if (!inputMessage.trim() || isLoading || !connectionStatus.isConnected) {
+      console.log(`[AgentChatModal] ❌ Aborting send - conditions not met:`, {
+        hasMessage: !!inputMessage.trim(),
+        isLoading,
+        isConnected: connectionStatus.isConnected
+      });
+      return;
+    }
 
+    console.log(`[AgentChatModal] ✅ Proceeding with message send`);
     const userMessage: ChatMessage = {
       id: 'user-' + Date.now(),
       type: 'user',
@@ -266,6 +329,10 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
       isLoading: true
     };
 
+    console.log(`[AgentChatModal] 💬 Adding messages to chat:`, {
+      userMessage: userMessage.content,
+      loadingMessage: loadingMessage.content
+    });
     setMessages(prev => [...prev, userMessage, loadingMessage]);
     const currentMessage = inputMessage.trim();
     setInputMessage('');
@@ -273,12 +340,24 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
     setError(null);
 
     try {
-      if (!connectionStatus.llmConfig || !tenant?.id) {
+      console.log(`[AgentChatModal] 🔍 Validating LLM configuration:`, {
+        hasLlmConfig: !!connectionStatus.llmConfig,
+        hasTenantId: !!tenantId,
+        llmConfig: connectionStatus.llmConfig
+      });
+      
+      if (!connectionStatus.llmConfig || !tenantId) {
+        console.error(`[AgentChatModal] ❌ Missing LLM config or tenant ID:`, {
+          llmConfig: connectionStatus.llmConfig,
+          tenantId: tenantId
+        });
         throw new Error('No LLM configuration available for this agent');
       }
 
       // Create LLM service with integrated MCP support
-      const llmService = createLLMService(tenant.id);
+      console.log(`[AgentChatModal] 🤖 Creating LLM service for tenant: ${tenantId}`);
+      const llmService = createLLMService(tenantId);
+      console.log(`[AgentChatModal] ✅ LLM service created successfully`);
 
       // Add user message to conversation history
       const newHistory = [...conversationHistory, {
@@ -286,18 +365,31 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
         content: currentMessage
       }];
 
-      console.log(`[AgentChatModal] Sending message to agent ${agent.id} with ${newHistory.length} history messages`);
+      console.log(`[AgentChatModal] 📋 Sending message to agent ${agent.id} with:`, {
+        historyLength: newHistory.length,
+        currentMessage,
+        agent: { id: agent.id, name: agent.name },
+        llmConfig: { provider: connectionStatus.llmConfig.provider, model: connectionStatus.llmConfig.model },
+        selectedConnection: connectionStatus.selectedConnection ? { id: connectionStatus.selectedConnection.id, name: connectionStatus.selectedConnection.name } : null
+      });
 
       // Call LLM service with integrated MCP support - agent context ensures proper MCP server usage
+      console.log(`[AgentChatModal] 🚀 Calling llmService.processMessage...`);
       const response = await llmService.processMessage(
         agent,
         connectionStatus.llmConfig,
         currentMessage,
         newHistory.slice(-10), // Keep last 10 messages for context
-        connectionStatus.selectedConnection
+        undefined, // TODO: Update this modal to use sessionId-based auth like ChatPage
+        tenantId
       );
 
-      console.log(`[AgentChatModal] Received response with ${response.toolsUsed?.length || 0} tools used`);
+      console.log(`[AgentChatModal] ✅ Received LLM response:`, {
+        hasContent: !!response.content,
+        contentLength: response.content?.length || 0,
+        toolsUsed: response.toolsUsed?.length || 0,
+        response
+      });
 
       // Update conversation history
       const updatedHistory = [
@@ -308,6 +400,7 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
         }
       ];
       setConversationHistory(updatedHistory);
+      console.log(`[AgentChatModal] 📝 Updated conversation history, total messages: ${updatedHistory.length}`);
 
       // Update the loading message with actual response
       setMessages(prev => prev.map(msg => 
@@ -322,14 +415,25 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
       ));
 
       // Record agent usage
-      const agentService = createAgentService(tenant.id);
+      const agentService = createAgentService(tenantId);
       await agentService.recordUsage(agent.id);
 
     } catch (err) {
-      console.error('Failed to send message:', err);
+      console.error('[AgentChatModal] ❌ FAILED TO SEND MESSAGE:', err);
+      console.error('[AgentChatModal] Error details:', {
+        error: err,
+        stack: err instanceof Error ? err.stack : 'No stack trace',
+        message: err instanceof Error ? err.message : 'Unknown error',
+        connectionStatus,
+        agentId: agent.id,
+        tenantId: tenantId,
+        currentMessage
+      });
+      
       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
       
       // Update loading message with error
+      console.log(`[AgentChatModal] 🔄 Updating loading message with error`);
       setMessages(prev => prev.map(msg => 
         msg.id === loadingMessage.id
           ? {
@@ -343,10 +447,11 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
       
       setError(errorMessage);
     } finally {
+      console.log(`[AgentChatModal] 🏁 Message send process completed, setting loading to false`);
       setIsLoading(false);
       inputRef.current?.focus();
     }
-  }, [inputMessage, isLoading, agent, connectionStatus, conversationHistory, tenant?.id]);
+  }, [inputMessage, isLoading, agent, connectionStatus, conversationHistory, tenantId]);
 
   // Handle clearing chat
   const handleClearChat = useCallback(() => {
@@ -456,19 +561,44 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
                 </h2>
                 {!isMinimized && (
                   <div className="flex items-center space-x-2 text-xs text-gray-500">
-                    <span>{agent.useCase}</span>
-                    <div className={clsx(
-                      'flex items-center space-x-1 px-2 py-0.5 rounded-full',
-                      connectionStatus.isConnected 
-                        ? 'bg-green-100 text-green-700' 
-                        : 'bg-red-100 text-red-700'
-                    )}>
-                      {connectionStatus.isConnected ? (
-                        <CheckCircle className="h-3 w-3" />
-                      ) : (
-                        <AlertTriangle className="h-3 w-3" />
+                    <span>{(agent as any).useCase || agent.persona}</span>
+                    <div className="flex items-center space-x-2">
+                      <div className={clsx(
+                        'flex items-center space-x-1 px-2 py-0.5 rounded-full text-xs',
+                        connectionStatus.isConnected 
+                          ? 'bg-green-100 text-green-700' 
+                          : 'bg-red-100 text-red-700'
+                      )}>
+                        {connectionStatus.isConnected ? (
+                          <CheckCircle className="h-3 w-3" />
+                        ) : (
+                          <AlertTriangle className="h-3 w-3" />
+                        )}
+                        <span>{connectionStatus.isConnected ? 'Connected' : 'Disconnected'}</span>
+                      </div>
+                      
+                      {/* MCP SSE Status */}
+                      <div className={clsx(
+                        'flex items-center space-x-1 px-2 py-0.5 rounded-full text-xs',
+                        mcpConnected 
+                          ? 'bg-blue-100 text-blue-700' 
+                          : 'bg-gray-100 text-gray-600'
+                      )}>
+                        {mcpConnected ? (
+                          <Wifi className="h-3 w-3" />
+                        ) : (
+                          <WifiOff className="h-3 w-3" />
+                        )}
+                        <span>SSE {mcpConnected ? 'On' : 'Off'}</span>
+                      </div>
+                      
+                      {/* Active Tools Indicator */}
+                      {activeMCPTools.length > 0 && (
+                        <div className="flex items-center space-x-1 px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 text-xs">
+                          <Activity className="h-3 w-3 animate-pulse" />
+                          <span>{activeMCPTools.length} tools</span>
+                        </div>
                       )}
-                      <span>{connectionStatus.isConnected ? 'Connected' : 'Disconnected'}</span>
                     </div>
                   </div>
                 )}
@@ -555,6 +685,18 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
                 </div>
               )}
 
+              {/* Active MCP Tools Progress */}
+              {activeMCPTools.length > 0 && (
+                <div className="px-4 pt-2">
+                  <MCPToolProgressList
+                    toolCalls={activeMCPTools}
+                    title="Processing Tools"
+                    compact={true}
+                    maxVisible={3}
+                  />
+                </div>
+              )}
+
               {/* Messages Area */}
               <div className="flex-1 p-4 overflow-y-auto space-y-4 min-h-0">
                 {messages.map((message) => (
@@ -572,15 +714,18 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
                     )}
                     
                     <div className={clsx(
-                      'max-w-[70%] rounded-lg px-4 py-3',
+                      'max-w-[70%] rounded-lg px-5 py-4',
                       message.type === 'user'
-                        ? 'bg-primary text-primary-foreground'
+                        ? 'bg-blue-700 text-white shadow-lg border border-blue-800'
                         : message.error
-                        ? 'bg-red-50 border border-red-200'
-                        : 'bg-gray-50'
+                        ? 'bg-red-50 border border-red-300 text-red-900 shadow-sm'
+                        : 'bg-gray-50 text-gray-900 border border-gray-300 shadow-sm'
                     )}>
                       <div className="space-y-2">
-                        <div className="text-sm markdown-content">
+                        <div className={clsx(
+                          "text-sm markdown-content",
+                          message.type === 'user' && "text-white [&_*]:text-white [&_.markdown-content]:text-white [&_.markdown-content_*]:text-white"
+                        )} style={message.type === 'user' ? { color: 'white' } : {}}>
                           <EnhancedMarkdown>
                             {message.content}
                           </EnhancedMarkdown>
@@ -599,8 +744,8 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
                             {message.response.toolsUsed && message.response.toolsUsed.length > 0 && (
                               <div className="flex flex-wrap gap-1">
                                 <span className="text-muted-foreground mr-2">Tools used:</span>
-                                {message.response.toolsUsed.map((tool: string) => (
-                                  <Badge key={tool} variant="outline" className="text-xs bg-green-50 text-green-700">
+                                {message.response.toolsUsed.map((tool: string, index: number) => (
+                                  <Badge key={`${message.id}-${tool}-${index}`} variant="outline" className="text-xs bg-green-50 text-green-700">
                                     {tool}
                                   </Badge>
                                 ))}
@@ -671,7 +816,7 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
                 
                 <div className="flex items-center justify-between mt-2">
                   <div className="text-xs text-muted-foreground">
-                    {agent.name} • {agent.useCase}
+                    {agent.name} • {(agent as any).useCase || agent.persona}
                     {connectionStatus.llmConfig && (
                       <span className="ml-2">
                         • {connectionStatus.llmConfig.provider} ({connectionStatus.llmConfig.model})

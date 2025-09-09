@@ -126,6 +126,7 @@ export class PrivacyProtector {
     const protectedRecord: any = {};
 
     for (const [key, value] of Object.entries(record)) {
+      if (!key) continue; // Skip if key is undefined/null
       const lowerKey = key.toLowerCase();
       
       // Skip whitelisted fields
@@ -155,11 +156,12 @@ export class PrivacyProtector {
    * Check if a field name indicates sensitive data
    */
   private isSensitiveField(fieldName: string): boolean {
+    if (!fieldName) return false; // Skip if fieldName is undefined/null
     const lowerName = fieldName.toLowerCase();
     
     // Check custom sensitive fields
     if (this.config.customSensitiveFields.some(field => 
-      lowerName.includes(field.toLowerCase())
+      field && lowerName.includes(field.toLowerCase())
     )) {
       return true;
     }
@@ -279,6 +281,7 @@ export class PrivacyProtector {
       return patternType.toUpperCase();
     }
 
+    if (!fieldName) return 'DATA'; // Default if fieldName is undefined/null
     const lowerField = fieldName.toLowerCase();
     if (lowerField.includes('email')) return 'EMAIL';
     if (lowerField.includes('phone')) return 'PHONE';

@@ -19,7 +19,7 @@ import {
 // Components for each tab
 import LLMConfigSection from '@/features/settings/components/LLMConfigSection';
 import MCPServerConfig from '@/features/settings/components/McpServerConnection';
-import SecurityConfig from '@/features/settings/components/SecurityConfig';
+import FunctionalPrivacyConfig from '@/features/settings/components/FunctionalPrivacyConfig';
 import AdvancedConfig from '@/features/settings/components/AdvancedConfig';
 
 // MCP Bridge for production-ready configuration sync
@@ -262,12 +262,12 @@ export default function SettingsPage() {
 
         {/* Privacy Protection Tab */}
         <TabsContent value="privacy" className="space-y-6">
-          {mcpPrivacyConfig && (
-            <SecurityConfig
-              config={mcpPrivacyConfig}
-              onConfigChange={saveMCPPrivacyConfig}
+          {tenant && (
+            <FunctionalPrivacyConfig
+              tenantId={tenant.id}
+              userId={user?.id}
+              scope="tenant"
               canModify={canModifySettings}
-              isSaving={isSaving}
             />
           )}
         </TabsContent>

@@ -55,7 +55,7 @@ export const EnhancedMarkdown: React.FC<EnhancedMarkdownProps> = ({
         
         // Enhanced headings
         h1: ({ children }) => (
-          <h1 className="text-2xl font-bold text-gray-900 mb-4 mt-6 pb-2 border-b border-gray-200">
+          <h1 className="text-2xl font-bold text-gray-900 mb-4 mt-6">
             {children}
           </h1>
         ),

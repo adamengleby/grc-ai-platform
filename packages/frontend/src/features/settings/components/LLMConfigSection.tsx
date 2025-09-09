@@ -18,24 +18,8 @@ import {
 } from 'lucide-react';
 import AddLlmConfigModal, { NewLlmConfig } from './AddLlmConfigModal';
 import { useAuthStore } from '@/app/store/auth';
+import { backendLLMService, UserLlmConfig } from '@/lib/backendLLMService';
 
-interface UserLlmConfig {
-  id: string;
-  name: string;
-  description: string;
-  provider: string;
-  model: string;
-  endpoint: string;
-  apiKey: string;
-  customHeaders?: Record<string, string>;
-  maxTokens: number;
-  temperature: number;
-  status: 'connected' | 'disconnected' | 'error' | 'testing';
-  isEnabled: boolean;
-  createdAt: string;
-  lastTested?: string;
-  errorMessage?: string;
-}
 
 interface LLMConfigSectionProps {
   canModify?: boolean;
@@ -52,27 +36,21 @@ export default function LLMConfigSection({
   const [editModalOpen, setEditModalOpen] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load user's LLM configurations from storage
+  // Load user's LLM configurations from database
   useEffect(() => {
     loadLlmConfigs();
   }, [tenant?.id]);
 
-  const loadLlmConfigs = () => {
+  const loadLlmConfigs = async () => {
     setIsLoading(true);
     try {
-      const storageKey = `user_llm_configs_${tenant?.id}`;
-      console.log('Loading LLM configs for tenant:', tenant?.id, 'with key:', storageKey);
-      const stored = localStorage.getItem(storageKey);
-      console.log('Raw LLM config data:', stored);
-      
-      if (stored) {
-        const userConfigs: UserLlmConfig[] = JSON.parse(stored);
-        console.log('Loaded', userConfigs.length, 'LLM configurations:', userConfigs);
-        setLlmConfigs(userConfigs);
-      } else {
-        console.log('No stored LLM configurations found, starting with empty list');
-        setLlmConfigs([]);
-      }
+      console.log('Loading LLM configs for tenant:', tenant?.id);
+      const configs = await backendLLMService.getAllLlmConfigs();
+      console.log('Loaded', configs.length, 'LLM configurations:');
+      configs.forEach((config, i) => {
+        console.log(`  LLM Config ${i}:`, { id: config.id, name: config.name, idType: typeof config.id });
+      });
+      setLlmConfigs(configs);
     } catch (error) {
       console.error('Error loading LLM configurations:', error);
       setLlmConfigs([]);
@@ -80,68 +58,70 @@ export default function LLMConfigSection({
     setIsLoading(false);
   };
 
-  // Debug function to clear all LLM configurations
-  const clearAllLlmConfigs = () => {
-    console.log('=== CLEARING ALL LLM CONFIGURATIONS ===');
-    const storageKey = `user_llm_configs_${tenant?.id}`;
-    localStorage.removeItem(storageKey);
-    loadLlmConfigs();
-  };
 
-  // Temporary: Add to window for debugging
-  (window as any).clearAllLlmConfigs = clearAllLlmConfigs;
 
-  const saveLlmConfigs = (updatedConfigs: UserLlmConfig[]) => {
+  const handleAddLlmConfig = async (llmConfig: NewLlmConfig) => {
     try {
-      const storageKey = `user_llm_configs_${tenant?.id}`;
-      localStorage.setItem(storageKey, JSON.stringify(updatedConfigs));
-      setLlmConfigs(updatedConfigs);
+      const newConfig = await backendLLMService.createLlmConfig(llmConfig);
+      setLlmConfigs(prev => [...prev, newConfig]);
     } catch (error) {
-      console.error('Error saving LLM configurations:', error);
+      console.error('Error adding LLM configuration:', error);
     }
   };
 
-  const handleAddLlmConfig = async (llmConfig: NewLlmConfig) => {
-    const newConfig: UserLlmConfig = {
-      ...llmConfig,
-      status: 'disconnected',
-      lastTested: new Date().toISOString()
-    };
-
-    const updatedConfigs = [...llmConfigs, newConfig];
-    saveLlmConfigs(updatedConfigs);
-  };
-
   const handleEditLlmConfig = (configId: string) => {
+    console.log('Edit button clicked for config ID:', configId);
+    console.log('Available configs:', llmConfigs.map(c => ({ id: c.id, name: c.name })));
     setEditModalOpen(configId);
   };
 
   const handleUpdateLlmConfig = async (configId: string, updatedConfig: Partial<NewLlmConfig>) => {
-    const updatedConfigs = llmConfigs.map(config => 
-      config.id === configId ? { 
-        ...config, 
-        ...updatedConfig,
-        lastTested: new Date().toISOString()
-      } : config
-    );
-    saveLlmConfigs(updatedConfigs);
-    setEditModalOpen(null);
+    try {
+      const updated = await backendLLMService.updateLlmConfig(configId, updatedConfig);
+      setLlmConfigs(prev => prev.map(config => 
+        config.id === configId ? updated : config
+      ));
+      setEditModalOpen(null);
+    } catch (error) {
+      console.error('Error updating LLM configuration:', error);
+    }
   };
 
   const handleDeleteLlmConfig = async (configId: string) => {
     if (!canModify) return;
 
-    const updatedConfigs = llmConfigs.filter(c => c.id !== configId);
-    saveLlmConfigs(updatedConfigs);
+    try {
+      await backendLLMService.deleteLlmConfig(configId);
+      setLlmConfigs(prev => prev.filter(c => c.id !== configId));
+    } catch (error) {
+      console.error('Error deleting LLM configuration:', error);
+    }
   };
 
   const handleToggleLlmConfig = async (configId: string, enabled: boolean) => {
     if (!canModify) return;
 
-    const updatedConfigs = llmConfigs.map(c => 
-      c.id === configId ? { ...c, isEnabled: enabled } : c
-    );
-    saveLlmConfigs(updatedConfigs);
+    console.log('🔧 Toggle Debug - configId received:', configId);
+    console.log('🔧 Toggle Debug - configId type:', typeof configId);
+    console.log('🔧 Toggle Debug - enabled:', enabled);
+    console.log('🔧 Toggle Debug - current configs:'); 
+    llmConfigs.forEach((c, i) => {
+      console.log(`  Config ${i}:`, { id: c.id, name: c.name, idType: typeof c.id });
+    });
+
+    if (!configId || configId === 'undefined') {
+      console.error('❌ Invalid config ID - cannot toggle');
+      return;
+    }
+
+    try {
+      const updated = await backendLLMService.toggleLlmConfig(configId, enabled);
+      setLlmConfigs(prev => prev.map(c => 
+        c.id === configId ? updated : c
+      ));
+    } catch (error) {
+      console.error('Error toggling LLM configuration:', error);
+    }
   };
 
   const getProviderIcon = (provider: string) => {
@@ -277,19 +257,19 @@ export default function LLMConfigSection({
                       <div className="flex items-center space-x-2">
                         <Zap className="h-3 w-3 text-gray-400" />
                         <span className="text-gray-600">Max Tokens:</span>
-                        <span className="font-medium">{config.maxTokens.toLocaleString()}</span>
+                        <span className="font-medium">{config.maxTokens?.toLocaleString() || 'N/A'}</span>
                       </div>
                       <div className="flex items-center space-x-2">
                         <Settings className="h-3 w-3 text-gray-400" />
                         <span className="text-gray-600">Temp:</span>
-                        <span className="font-medium">{config.temperature}</span>
+                        <span className="font-medium">{config.temperature ?? 'N/A'}</span>
                       </div>
                     </div>
                     
                     <div className="flex items-center space-x-2">
                       <Calendar className="h-3 w-3 text-gray-400" />
                       <span className="text-gray-600">Added:</span>
-                      <span>{new Date(config.createdAt).toLocaleDateString()}</span>
+                      <span>{config.createdAt ? new Date(config.createdAt).toLocaleDateString() : 'Unknown'}</span>
                     </div>
                   </div>
 
@@ -385,6 +365,8 @@ export default function LLMConfigSection({
       {/* Edit LLM Configuration Modal */}
       {editModalOpen && (() => {
         const configToEdit = llmConfigs.find(c => c.id === editModalOpen);
+        console.log('Edit modal rendering. editModalOpen:', editModalOpen);
+        console.log('configToEdit found:', configToEdit);
         return configToEdit ? (
           <AddLlmConfigModal
             isOpen={!!editModalOpen}

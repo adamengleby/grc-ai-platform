@@ -3,6 +3,7 @@ import { Button } from '@/app/components/ui/Button';
 import { Input } from '@/app/components/ui/Input';
 import { Alert } from '@/app/components/ui/Alert';
 import { Shield, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
+import { useArcherSessionStore } from '@/app/store/archerSession';
 
 interface ArcherAuthModalProps {
   isOpen: boolean;
@@ -12,8 +13,15 @@ interface ArcherAuthModalProps {
 }
 
 export interface ArcherSessionData {
-  sessionToken: string;
+  sessionId: string; // Changed from sessionToken to sessionId for security
   expiresAt: Date;
+  oauthToken?: {
+    access_token: string;
+    token_type: string;
+    expires_in: number;
+    scope: string;
+    allowed_tools: string[];
+  };
   userInfo: {
     username: string;
     instanceId: string;
@@ -26,7 +34,7 @@ interface AuthFormData {
   instanceId: string;
   username: string;
   password: string;
-  userDomainId: string | null;
+  userDomainId: string;
 }
 
 export const ArcherAuthModal: React.FC<ArcherAuthModalProps> = ({
@@ -46,7 +54,7 @@ export const ArcherAuthModal: React.FC<ArcherAuthModalProps> = ({
           instanceId: parsedData.instanceId || '',
           username: parsedData.username || '',
           password: '', // Never save password
-          userDomainId: parsedData.userDomainId || null
+          userDomainId: parsedData.userDomainId || ''
         };
       }
     } catch (error) {
@@ -58,13 +66,16 @@ export const ArcherAuthModal: React.FC<ArcherAuthModalProps> = ({
       instanceId: '',
       username: '',
       password: '',
-      userDomainId: null
+      userDomainId: ''
     };
   });
   
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<'form' | 'authenticating' | 'success'>('form');
+
+  // Get session store methods
+  const { setSession } = useArcherSessionStore();
 
   const handleInputChange = (field: keyof AuthFormData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -102,8 +113,9 @@ export const ArcherAuthModal: React.FC<ArcherAuthModalProps> = ({
     }
 
     return {
-      sessionToken: result.sessionData.sessionToken,
+      sessionId: result.sessionData.sessionId, // Now receiving sessionId instead of token
       expiresAt: new Date(result.sessionData.expiresAt),
+      oauthToken: result.sessionData.oauthToken, // Capture OAuth token for MCP tool access
       userInfo: result.sessionData.userInfo
     };
   };
@@ -139,6 +151,10 @@ export const ArcherAuthModal: React.FC<ArcherAuthModalProps> = ({
       }
       
       setStep('success');
+      
+      // Store session data in Zustand store for MCP access
+      console.log('[Auth Modal] Storing session data for MCP access:', { sessionId: sessionData.sessionId });
+      setSession(sessionData);
       
       // Brief success display, then call callback
       setTimeout(() => {

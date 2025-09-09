@@ -18,12 +18,13 @@ export interface ArcherCredentials {
 
 /**
  * MCP Client for direct communication with Archer MCP Server
- * Handles real-time data retrieval from Archer GRC platform via HTTP
+ * Uses MCP standard JSON-RPC protocol over HTTP transport
+ * Handles real-time data retrieval from Archer GRC platform
  */
 export class MCPClient {
   private isConnected = false;
   private currentCredentials: ArcherCredentials | null = null;
-  private mcpServerUrl: string = 'http://localhost:3002';
+  private mcpServerUrl: string = 'http://localhost:3006';
 
   constructor() {
     // Don't initialize automatically - wait for credentials
@@ -61,54 +62,63 @@ export class MCPClient {
   }
 
   /**
-   * Make HTTP request to MCP server
+   * Make MCP JSON-RPC request with credentials injection for tool calls
    */
-  private async makeHttpRequest(endpoint: string, data?: any): Promise<any> {
-    try {
-      const url = `${this.mcpServerUrl}${endpoint}`;
-      const options: RequestInit = {
-        method: data ? 'POST' : 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      };
-
-      if (data) {
-        options.body = JSON.stringify(data);
+  private async makeMCPToolCall(toolName: string, toolArgs: any): Promise<any> {
+    // Inject credentials for Archer GRC tool calls
+    const params = {
+      name: toolName,
+      arguments: {
+        ...toolArgs,
+        credentials: this.currentCredentials
       }
+    };
 
-      const response = await fetch(url, options);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP request failed: ${response.status} ${response.statusText}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error(`[MCP Client] HTTP request failed for ${endpoint}:`, error);
-      throw error;
-    }
+    return await this.sendMCPRequest('tools/call', params);
   }
 
   /**
-   * Send request to HTTP MCP server
+   * Send request to MCP server using standard JSON-RPC
    */
   private async sendMCPRequest(method: string, params: any, timeoutMs = 30000): Promise<any> {
     if (!this.isConnected) {
       throw new Error('MCP server not connected');
     }
 
-    // Handle different MCP methods by mapping to HTTP endpoints
-    if (method === 'tools/list') {
-      return await this.makeHttpRequest('/tools');
-    } else if (method === 'tools/call') {
-      return await this.makeHttpRequest('/call', {
-        name: params.name,
-        arguments: params.arguments,
-        credentials: this.currentCredentials
+    // Use MCP standard JSON-RPC format
+    const mcpRequest = {
+      jsonrpc: '2.0',
+      id: Date.now(),
+      method: method,
+      params: params
+    };
+
+    console.log(`[MCP Client] Sending JSON-RPC request:`, mcpRequest);
+
+    try {
+      const response = await fetch(`${this.mcpServerUrl}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(mcpRequest)
       });
-    } else {
-      throw new Error(`Unsupported MCP method: ${method}`);
+
+      if (!response.ok) {
+        throw new Error(`MCP request failed: ${response.status} ${response.statusText}`);
+      }
+
+      const jsonResponse = await response.json();
+      console.log(`[MCP Client] MCP JSON-RPC response:`, jsonResponse);
+
+      if (jsonResponse.error) {
+        throw new Error(`MCP JSON-RPC error: ${jsonResponse.error.message}`);
+      }
+
+      return jsonResponse.result;
+    } catch (error) {
+      console.error(`[MCP Client] MCP JSON-RPC request failed:`, error);
+      throw error;
     }
   }
 
@@ -128,11 +138,8 @@ export class MCPClient {
     try {
       await this.ensureMCPConnection();
 
-      const result = await this.sendMCPRequest('tools/call', {
-        name: 'get_archer_applications',
-        arguments: {
-          tenant_id: tenantId
-        }
+      const result = await this.makeMCPToolCall('get_archer_applications', {
+        tenant_id: tenantId
       });
 
       return this.parseToolResult(result);
@@ -149,15 +156,12 @@ export class MCPClient {
     try {
       await this.ensureMCPConnection();
 
-      const result = await this.sendMCPRequest('tools/call', {
-        name: 'search_archer_records',
-        arguments: {
-          tenant_id: tenantId,
-          applicationName,
-          pageSize,
-          pageNumber,
-          includeFullData: true
-        }
+      const result = await this.makeMCPToolCall('search_archer_records', {
+        tenant_id: tenantId,
+        applicationName,
+        pageSize,
+        pageNumber,
+        includeFullData: true
       });
 
       return this.parseToolResult(result);
@@ -172,12 +176,9 @@ export class MCPClient {
    */
   async getArcherStats(tenantId: string, applicationName: string): Promise<any> {
     try {
-      const result = await this.sendMCPRequest('tools/call', {
-        name: 'get_archer_stats',
-        arguments: {
-          tenant_id: tenantId,
-          applicationName
-        }
+      const result = await this.makeMCPToolCall('get_archer_stats', {
+        tenant_id: tenantId,
+        applicationName
       });
 
       return this.parseToolResult(result);
@@ -197,11 +198,8 @@ export class MCPClient {
         return false;
       }
 
-      const result = await this.sendMCPRequest('tools/call', {
-        name: 'test_archer_connection',
-        arguments: {
-          tenant_id: tenantId
-        }
+      const result = await this.makeMCPToolCall('test_archer_connection', {
+        tenant_id: tenantId
       });
 
       return result && !result.error;
@@ -242,7 +240,7 @@ export class MCPClient {
         try {
           await this.connectToHttpServer();
         } catch (error) {
-          console.error('[MCP Client] Failed to connect to HTTP server:', error);
+          console.error('[MCP Client] Failed to connect to MCP server:', error);
           return [];
         }
       }
@@ -256,13 +254,13 @@ export class MCPClient {
   }
 
   /**
-   * Connect to HTTP MCP server without credentials (for tool listing)
+   * Connect to MCP server without credentials (for tool listing)
    */
   private async connectToHttpServer(): Promise<void> {
     try {
-      console.log('[MCP Client] Attempting to connect to HTTP MCP server...');
+      console.log('[MCP Client] Attempting to connect to MCP server...');
       
-      // First try a basic health check
+      // Try health check first
       const response = await fetch(`${this.mcpServerUrl}/health`, {
         method: 'GET',
         headers: {
@@ -272,41 +270,44 @@ export class MCPClient {
 
       if (response.ok) {
         this.isConnected = true;
-        console.log('[MCP Client] Connected to HTTP MCP server');
+        console.log('[MCP Client] Connected to MCP server via health check');
       } else {
-        // If /health doesn't exist, try /tools directly
-        const toolsResponse = await fetch(`${this.mcpServerUrl}/tools`, {
-          method: 'GET',
+        // If health check fails, try a basic MCP JSON-RPC request
+        const mcpResponse = await fetch(`${this.mcpServerUrl}/mcp`, {
+          method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 'health-check',
+            method: 'tools/list',
+            params: {}
+          })
         });
 
-        if (toolsResponse.ok) {
+        if (mcpResponse.ok) {
           this.isConnected = true;
-          console.log('[MCP Client] Connected to HTTP MCP server via /tools');
+          console.log('[MCP Client] Connected to MCP server via JSON-RPC');
         } else {
-          throw new Error(`HTTP MCP server not available: ${toolsResponse.status}`);
+          throw new Error(`MCP server not available: ${mcpResponse.status}`);
         }
       }
     } catch (error) {
-      console.error('[MCP Client] Failed to connect to HTTP MCP server:', error);
+      console.error('[MCP Client] Failed to connect to MCP server:', error);
       this.isConnected = false;
       throw error;
     }
   }
 
   /**
-   * Call any MCP tool by name (public access to sendMCPRequest)
+   * Call any MCP tool by name
    */
   async callMCPTool(toolName: string, args: any): Promise<any> {
     try {
       await this.ensureMCPConnection();
 
-      return await this.sendMCPRequest('tools/call', {
-        name: toolName,
-        arguments: args
-      });
+      return await this.makeMCPToolCall(toolName, args);
     } catch (error) {
       console.error(`[MCP Client] Error calling tool ${toolName}:`, error);
       throw error;

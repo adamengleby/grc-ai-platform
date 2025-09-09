@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/app/components/ui/Button';
 import { Alert } from '@/app/components/ui/Alert';
 import {
@@ -9,22 +10,23 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '@/app/store/auth';
 import { AIAgent } from '@/types/agent';
-import { createAgentService } from '@/lib/agentService';
+import { createAgentService } from '@/lib/backendAgentService';
 import AgentStatsCards from '@/features/agents/components/AgentStatsCards';
 import AgentCard from '@/features/agents/components/AgentCard';
 import AgentConfigModal from '@/features/agents/components/AgentConfigModal';
-import { AgentChatModal } from '@/features/agents/components/AgentChatModal';
+// Backend test component no longer needed - using database APIs directly
 
 export const AgentsPage: React.FC = () => {
-  const { tenant } = useAuthStore();
+  console.log('[AgentsPage] 🔍 COMPONENT RENDER - Debug keystroke issue');
+  const tenant = useAuthStore(state => state.tenant);
+  const navigate = useNavigate();
+  console.log('[AgentsPage] 🏢 Tenant object reference check:', tenant?.id, typeof tenant, !!tenant);
   const [agents, setAgents] = useState<AIAgent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(new Date());
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<AIAgent | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [chatModalOpen, setChatModalOpen] = useState(false);
-  const [chatAgent, setChatAgent] = useState<AIAgent | null>(null);
 
   // Load agents on component mount
   useEffect(() => {
@@ -50,10 +52,12 @@ export const AgentsPage: React.FC = () => {
   };
 
   const handleToggleAgent = async (agentId: string, enabled: boolean) => {
+    console.log('[AgentsPage] handleToggleAgent called with agentId:', agentId, 'enabled:', enabled);
     if (!tenant?.id) return;
 
     try {
       const agentService = createAgentService(tenant.id);
+      console.log('[AgentsPage] Calling updateAgent with agentId:', agentId);
       await agentService.updateAgent(agentId, { isEnabled: enabled });
       await loadAIAgents(); // Reload the list
     } catch (error) {
@@ -72,19 +76,17 @@ export const AgentsPage: React.FC = () => {
   };
 
   const handleChatWithAgent = (agent: AIAgent) => {
-    setChatAgent(agent);
-    setChatModalOpen(true);
+    console.log(`[AgentsPage] 💬 CHAT BUTTON CLICKED for agent: ${agent.name} (${agent.id})`);
+    console.log(`[AgentsPage] Navigating to chat page with agent:`, agent.id);
+    
+    // Navigate to chat page with agent ID as URL parameter
+    navigate(`/chat?agent=${agent.id}`);
   };
 
   const handleModalClose = () => {
     setConfigModalOpen(false);
     setShowCreateModal(false);
     setEditingAgent(null);
-  };
-
-  const handleChatModalClose = () => {
-    setChatModalOpen(false);
-    setChatAgent(null);
   };
 
   const handleModalSave = () => {
@@ -115,6 +117,9 @@ export const AgentsPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Backend Database Integration Test */}
+      {/* BackendTestComponent removed - now using database APIs directly */}
+      
       {/* Header */}
       <div className="flex justify-between items-start">
         <div>
@@ -206,14 +211,6 @@ export const AgentsPage: React.FC = () => {
         onSave={handleModalSave}
       />
 
-      {/* Agent Chat Modal */}
-      {chatAgent && (
-        <AgentChatModal
-          isOpen={chatModalOpen}
-          onClose={handleChatModalClose}
-          agent={chatAgent}
-        />
-      )}
     </div>
   );
 };

@@ -2,6 +2,91 @@
  * Archer GRC Connection Tester
  * Tests actual authentication and session establishment with Archer GRC platform
  */
+
+/**
+ * SOAP authentication fallback for Archer Web Services API
+ */
+async function authenticateWithSOAP(baseUrl: string, loginData: any, timeout: number): Promise<{
+  success: boolean;
+  sessionId?: string;
+  error?: string;
+}> {
+  try {
+    const soapEndpoint = `${baseUrl.replace(/\/$/, '')}/ws/general.asmx`;
+    
+    // Build SOAP envelope
+    const soapEnvelope = `<?xml version="1.0" encoding="utf-8"?>
+<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+                 xmlns:xsd="http://www.w3.org/2001/XMLSchema" 
+                 xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
+  <soap12:Body>
+    <CreateDomainUserSessionFromInstance xmlns="http://archer-tech.com/webservices/">
+      <instanceName>${loginData.InstanceName}</instanceName>
+      <userName>${loginData.Username}</userName>
+      <userDomain>${loginData.UserDomain}</userDomain>
+      <password>${loginData.Password}</password>
+    </CreateDomainUserSessionFromInstance>
+  </soap12:Body>
+</soap12:Envelope>`;
+
+    const response = await fetch(soapEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/soap+xml; charset=utf-8',
+        'SOAPAction': 'http://archer-tech.com/webservices/CreateDomainUserSessionFromInstance'
+      },
+      body: soapEnvelope,
+      signal: AbortSignal.timeout(timeout)
+    });
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: `SOAP authentication failed (HTTP ${response.status}): ${response.statusText}`
+      };
+    }
+
+    const soapResponse = await response.text();
+
+    // Parse SOAP response to extract session token
+    const sessionTokenMatch = soapResponse.match(/<CreateDomainUserSessionFromInstanceResult>(.*?)<\/CreateDomainUserSessionFromInstanceResult>/);
+    
+    if (!sessionTokenMatch || !sessionTokenMatch[1]) {
+      // Check for SOAP fault
+      const faultMatch = soapResponse.match(/<soap:Fault>.*?<faultstring>(.*?)<\/faultstring>/);
+      const errorMessage = faultMatch ? faultMatch[1] : 'Invalid SOAP response - no session token found';
+      
+      return {
+        success: false,
+        error: `SOAP authentication failed: ${errorMessage}`
+      };
+    }
+
+    const sessionToken = sessionTokenMatch[1].trim();
+    
+    if (sessionToken && sessionToken !== '') {
+      return {
+        success: true,
+        sessionId: sessionToken
+      };
+    } else {
+      return {
+        success: false,
+        error: 'SOAP authentication failed: Empty session token returned'
+      };
+    }
+
+  } catch (error) {
+    if (error instanceof Error && error.name === 'TimeoutError') {
+      return { success: false, error: 'SOAP authentication timeout - Archer server not responding' };
+    }
+    
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'SOAP authentication request failed'
+    };
+  }
+}
 export interface ArcherCredentials {
   baseUrl: string;
   username: string;
@@ -54,14 +139,15 @@ export class ArcherConnectionTester {
       const responseTime = Date.now() - startTime;
       
       if (authResult.success) {
-        console.log(`[Archer Tester] Authentication successful - Session ID: ${authResult.sessionId?.substring(0, 10)}...`);
+        console.log(`[Archer Tester] Authentication successful using ${authResult.authMethod} - Session ID: ${authResult.sessionId?.substring(0, 10)}...`);
         
         return {
           success: true,
-          message: 'Archer authentication successful - Session established',
+          message: `Archer authentication successful using ${authResult.authMethod} - Session established`,
           responseTime,
           details: {
             sessionId: authResult.sessionId,
+            authMethod: authResult.authMethod,
             userInfo: authResult.userInfo,
             instanceInfo: {
               instanceId: credentials.instanceId,
@@ -136,7 +222,7 @@ export class ArcherConnectionTester {
   }
 
   /**
-   * Authenticate with Archer using the actual REST API endpoint from the MCP server
+   * Authenticate with Archer using REST API first, then SOAP fallback
    */
   private async authenticateAndGetSession(credentials: ArcherCredentials): Promise<{
     success: boolean;
@@ -144,19 +230,23 @@ export class ArcherConnectionTester {
     userInfo?: any;
     version?: string;
     error?: string;
+    authMethod?: string;
   }> {
+    const loginData = {
+      InstanceName: credentials.instanceId,
+      Username: credentials.username,
+      UserDomain: credentials.userDomainId || '',
+      Password: credentials.password
+    };
+
+    let sessionId: string | null = null;
+    let authMethod = 'REST';
+
+    // Try REST API first
     try {
-      // Use the actual Archer REST API authentication endpoint from MCP server implementation
       const authEndpoint = `${credentials.baseUrl.replace(/\/$/, '')}/api/core/security/login`;
       
-      const loginData = {
-        InstanceName: credentials.instanceId,
-        Username: credentials.username,
-        UserDomain: credentials.userDomainId || '',
-        Password: credentials.password
-      };
-
-      console.log(`[Archer Tester] Attempting authentication to: ${authEndpoint}`);
+      console.log(`[Archer Tester] Attempting REST authentication to: ${authEndpoint}`);
       console.log(`[Archer Tester] Login data:`, {
         InstanceName: credentials.instanceId,
         Username: credentials.username,
@@ -178,48 +268,63 @@ export class ArcherConnectionTester {
       if (response.ok) {
         const jsonResponse = await response.json();
         
-        console.log(`[Archer Tester] Authentication response:`, {
+        console.log(`[Archer Tester] REST authentication response:`, {
           IsSuccessful: jsonResponse.IsSuccessful,
           hasSessionToken: !!jsonResponse.RequestedObject?.SessionToken
         });
 
         if (jsonResponse.IsSuccessful && jsonResponse.RequestedObject?.SessionToken) {
-          return {
-            success: true,
-            sessionId: jsonResponse.RequestedObject.SessionToken,
-            userInfo: {
-              userName: credentials.username,
-              userDomain: credentials.userDomainId || ''
-            },
-            version: 'Archer 6.x'
-          };
+          sessionId = jsonResponse.RequestedObject.SessionToken;
+          console.log(`[Archer Tester] REST authentication successful`);
         } else {
-          const errorMessage = jsonResponse.ValidationMessages?.[0] || 
-                              jsonResponse.RequestedObject?.ValidationMessages?.[0] || 
-                              'Authentication failed - Invalid credentials';
-          return {
-            success: false,
-            error: errorMessage
-          };
+          console.log(`[Archer Tester] REST authentication failed - no session token in response`);
         }
       } else {
-        const errorText = await response.text();
+        console.log(`[Archer Tester] REST authentication failed: ${response.status} ${response.statusText}`);
+      }
+    } catch (error) {
+      console.log(`[Archer Tester] REST authentication error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+
+    // If REST failed, try SOAP fallback
+    if (!sessionId) {
+      console.log(`[Archer Tester] Attempting SOAP fallback authentication`);
+      
+      const soapResult = await authenticateWithSOAP(credentials.baseUrl, loginData, this.timeout);
+      
+      if (soapResult.success && soapResult.sessionId) {
+        sessionId = soapResult.sessionId;
+        authMethod = 'SOAP';
+        console.log(`[Archer Tester] SOAP fallback authentication successful`);
+      } else {
+        console.error(`[Archer Tester] Both REST and SOAP authentication failed`);
+        console.error(`[Archer Tester] SOAP error: ${soapResult.error}`);
+        
         return {
           success: false,
-          error: `Authentication failed (HTTP ${response.status}): ${errorText.substring(0, 200)}`
+          error: `Both REST and SOAP authentication failed. SOAP error: ${soapResult.error}`
         };
       }
+    }
 
-    } catch (error) {
-      if (error instanceof Error && error.name === 'TimeoutError') {
-        return { success: false, error: 'Authentication timeout - Archer server not responding' };
-      }
-      
+    // Return successful result
+    if (sessionId) {
       return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Authentication request failed'
+        success: true,
+        sessionId,
+        authMethod,
+        userInfo: {
+          userName: credentials.username,
+          userDomain: credentials.userDomainId || ''
+        },
+        version: 'Archer 6.x'
       };
     }
+
+    return {
+      success: false,
+      error: 'Authentication failed - no session token obtained from either REST or SOAP'
+    };
   }
 
 }

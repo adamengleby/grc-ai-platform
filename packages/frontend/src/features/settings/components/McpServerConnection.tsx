@@ -21,7 +21,8 @@ import {
 import { MCPPrivacyConfig } from '@/features/settings/pages/SettingsPage';
 import { mcpBridge } from '@/lib/mcpBridge';
 import { setupArcherMCPServer, getMCPServerStatus } from '@/lib/mcpSetup';
-import { getAllCredentials } from '@/lib/credentialsApi';
+import { getAllCredentials } from '@/lib/backendCredentialsApi';
+import { mcpConfigsManager, getAllMcpConfigs, enableMcpServer, updateMcpConfig, deleteMcpConfig } from '@/lib/backendMcpConfigsApi';
 import AddMcpServerModal, { NewMcpServerConfig } from './AddMcpServerModal';
 import McpServerConfigModal from './McpServerConfigModal';
 
@@ -89,7 +90,7 @@ export default function MCPServerConfig({
   const [serverConfigurations, setServerConfigurations] = useState<Record<string, McpServerConfig>>({});
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load user's MCP servers from storage
+  // Load user's MCP servers from database
   useEffect(() => {
     loadMcpServers();
   }, [config.tenantId]);
@@ -102,48 +103,76 @@ export default function MCPServerConfig({
     }
   }, [servers.length]);
 
-  const loadMcpServers = () => {
+  const loadMcpServers = async () => {
     setIsLoading(true);
     try {
-      const storageKey = `tenant_mcp_servers_${config.tenantId}`;
-      const stored = localStorage.getItem(storageKey);
+      // Set tenant context for database API
+      mcpConfigsManager.setTenantContext(config.tenantId);
+      await mcpConfigsManager.initialize();
       
-      if (stored) {
-        const userServers: UserMcpServer[] = JSON.parse(stored).map((server: any) => ({
-          ...server,
-          status: server.status || 'disconnected'
-        }));
-        setServers(userServers);
-      } else {
-        // Start with empty list - users add their own servers
-        setServers([]);
-      }
+      // Load MCP server configurations from database
+      const mcpConfigs = await getAllMcpConfigs();
+      
+      // Convert database format to UI format
+      const userServers: UserMcpServer[] = mcpConfigs.map(config => {
+        // Extract connection info from configuration_values field
+        const configValues = config.configuration_values || {};
+        const connectionId = configValues.connectionId || '';
+        const connectionName = configValues.connectionName || '';
+        
+        return {
+          id: config.server_id,
+          name: config.custom_name || config.display_name,
+          description: config.description,
+          endpoint: configValues.endpoint || 'http://localhost:3005',
+          connectionId: connectionId || undefined,
+          connectionName: connectionName || undefined,
+          category: config.category,
+          status: config.health_status === 'healthy' ? 'connected' : 
+                 config.health_status === 'unhealthy' ? 'error' : 'disconnected',
+          isEnabled: config.is_enabled === 1,
+          createdAt: config.enabled_at,
+          lastTested: config.last_health_check,
+          errorMessage: undefined
+        };
+      });
 
-      // Load server configurations
-      const configKey = `mcp_server_configs_${config.tenantId}`;
-      const storedConfigs = localStorage.getItem(configKey);
-      if (storedConfigs) {
-        const parsedConfigs = JSON.parse(storedConfigs);
-        console.log('[MCP Connection] Loaded server configurations:', parsedConfigs);
-        setServerConfigurations(parsedConfigs);
-      } else {
-        console.log('[MCP Connection] No stored configurations found');
-      }
+      setServers(userServers);
+
+      // Convert to server configurations format
+      const configurations: Record<string, McpServerConfig> = {};
+      mcpConfigs.forEach(config => {
+        // Extract connection info from configuration_values field
+        const configValues = config.configuration_values || {};
+        const connectionId = configValues.connectionId || '';
+        const connectionName = configValues.connectionName || config.custom_name || config.display_name;
+        
+        configurations[config.server_id] = {
+          connectionId: connectionId,
+          connectionName: connectionName,
+          isEnabled: config.is_enabled === 1,
+          lastConfigured: configValues.lastConfigured || config.enabled_at,
+          lastTested: config.last_health_check,
+          testStatus: configValues.testStatus || (config.health_status === 'healthy' ? 'success' : 
+                     config.health_status === 'unhealthy' ? 'error' : 'pending')
+        };
+      });
+      setServerConfigurations(configurations);
+
+      console.log(`✅ [MCP Connection] Loaded ${mcpConfigs.length} MCP configurations from database`);
     } catch (error) {
-      console.error('Error loading MCP servers:', error);
+      console.error('❌ [MCP Connection] Error loading MCP servers from database:', error);
       setServers([]);
+      setServerConfigurations({});
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   const saveMcpServers = (updatedServers: UserMcpServer[]) => {
-    try {
-      const storageKey = `tenant_mcp_servers_${config.tenantId}`;
-      localStorage.setItem(storageKey, JSON.stringify(updatedServers));
-      setServers(updatedServers);
-    } catch (error) {
-      console.error('Error saving MCP servers:', error);
-    }
+    // Update local state - database operations are handled by specific API calls
+    setServers(updatedServers);
+    console.log(`✅ [MCP Connection] Updated local MCP server state (${updatedServers.length} servers)`);
   };
 
   const handleAddServer = async (serverConfig: NewMcpServerConfig) => {
@@ -343,6 +372,11 @@ export default function MCPServerConfig({
     try {
       setIsLoading(true);
       
+      // Set tenant context for credentials manager
+      const { credentialsManager } = await import('@/lib/backendCredentialsApi');
+      credentialsManager.setTenantContext(config.tenantId);
+      await credentialsManager.initialize();
+      
       // Get available Archer credentials
       const credentials = await getAllCredentials();
       const archerCredentials = credentials.filter(cred => 
@@ -389,26 +423,38 @@ export default function MCPServerConfig({
     console.log('[MCP Connection] Saving configuration for server:', serverId);
     console.log('[MCP Connection] Server config:', serverConfig);
 
-    // Update server configurations
-    const updatedConfigs = {
-      ...serverConfigurations,
-      [serverId]: serverConfig
-    };
-    setServerConfigurations(updatedConfigs);
+    try {
+      // Find the MCP server to update
+      const server = servers.find(s => s.id === serverId);
+      if (!server) {
+        console.error('[MCP Connection] Server not found:', serverId);
+        return;
+      }
 
-    // Save to localStorage
-    const configKey = `mcp_server_configs_${config.tenantId}`;
-    localStorage.setItem(configKey, JSON.stringify(updatedConfigs));
-    console.log('[MCP Connection] Saved configurations to localStorage:', updatedConfigs);
-    
-    // Verify the save worked by immediately reading back
-    const verification = localStorage.getItem(configKey);
-    if (verification) {
-      const parsedVerification = JSON.parse(verification);
-      console.log('[MCP Connection] Verification - localStorage contains:', parsedVerification);
-      console.log('[MCP Connection] Configuration exists for serverId?', !!parsedVerification[serverId]);
-    } else {
-      console.error('[MCP Connection] ERROR: Configuration was not saved to localStorage!');
+      // Map the connection configuration to the database format
+      const configurationValues = {
+        connectionId: serverConfig.connectionId,
+        connectionName: serverConfig.connectionName,
+        lastConfigured: serverConfig.lastConfigured,
+        testStatus: serverConfig.testStatus
+      };
+
+      // Update the MCP configuration in the database
+      await updateMcpConfig(serverId, {
+        configuration_values: configurationValues,
+        is_enabled: serverConfig.isEnabled
+      });
+
+      // Update local state
+      const updatedConfigs = {
+        ...serverConfigurations,
+        [serverId]: serverConfig
+      };
+      setServerConfigurations(updatedConfigs);
+
+      console.log('[MCP Connection] Successfully saved configuration to database:', configurationValues);
+    } catch (error) {
+      console.error('[MCP Connection] Error saving configuration to database:', error);
     }
 
     // Update server status

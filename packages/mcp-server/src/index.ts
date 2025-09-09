@@ -6,8 +6,7 @@
  * Supports both stdio and HTTP modes
  */
 
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio';
-// Note: These imports are used in HTTP mode for MCP protocol compatibility
+// Note: StdioServerTransport is imported conditionally only when needed
 // import {
 //   CallToolRequestSchema,
 //   ListToolsRequestSchema,
@@ -96,9 +95,15 @@ if (port) {
   // Stdio mode (default)
   console.error('GRC Production MCP Server running on stdio');
   
-  const grcServer = new GRCMCPServer();
-  const server = grcServer.serverInstance;
-  const transport = new StdioServerTransport();
-  
-  server.connect(transport);
+  // Dynamic import to avoid loading stdio module unless needed
+  import('@modelcontextprotocol/sdk/server/stdio.js').then(({ StdioServerTransport }) => {
+    const grcServer = new GRCMCPServer();
+    const server = grcServer.serverInstance;
+    const transport = new StdioServerTransport();
+    
+    server.connect(transport);
+  }).catch(error => {
+    console.error('Failed to load stdio transport:', error);
+    process.exit(1);
+  });
 }

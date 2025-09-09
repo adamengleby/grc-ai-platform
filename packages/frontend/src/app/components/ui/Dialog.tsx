@@ -99,7 +99,7 @@ export function DialogContent({ children, className = '', showClose = true }: Di
       <div 
         className={`
           relative bg-white rounded-lg shadow-xl border border-gray-200 
-          w-full max-w-lg mx-4 sm:mx-6 md:mx-8 lg:mx-12 xl:mx-auto max-h-[90vh] overflow-y-auto
+          w-full max-w-lg mx-4 sm:mx-6 md:mx-8 lg:mx-12 xl:mx-auto max-h-[95vh] 
           animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2
           ${className}
         `}
@@ -178,7 +178,7 @@ interface DialogFooterProps {
 
 export function DialogFooter({ children, className = '' }: DialogFooterProps) {
   return (
-    <div className={`px-4 sm:px-6 lg:px-8 py-4 sm:py-6 border-t border-gray-200 bg-gray-50 rounded-b-lg ${className}`}>
+    <div className={`px-4 sm:px-6 lg:px-8 py-4 sm:py-6 border-t border-gray-200 bg-white ${className}`}>
       {children}
     </div>
   );

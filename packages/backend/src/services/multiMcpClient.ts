@@ -1,19 +1,29 @@
 import { McpServerDefinition, TenantMcpServerConfiguration, McpToolExecutionRequest, McpToolExecutionResult, McpServerHealth, McpTool } from '../types/mcp';
 import { agentConfigService } from './agentConfigService';
 import { credentialsManager } from './credentialsService';
+import { DatabaseService } from './databaseService';
+import EventSource from 'eventsource';
 
 /**
- * Enhanced MCP Client with multi-server routing capabilities
+ * Enhanced MCP Client with SSE transport and multi-server routing capabilities
  * Handles routing tool calls to appropriate MCP servers based on agent configuration
- * Implements health checking, failover, and comprehensive security
+ * Implements SSE connections, health checking, failover, and comprehensive security
  */
 export class MultiMcpClient {
-  private serverConnections = new Map<string, ServerConnection>();
+  private serverConnections = new Map<string, SSEServerConnection>();
   private serverHealthCache = new Map<string, McpServerHealth>();
-  private healthCheckInterval = 30000; // 30 seconds
+  private healthCheckInterval = 120000; // 2 minutes - reduced frequency to improve performance
   private requestTimeout = 30000; // 30 seconds
+  private db: DatabaseService;
+  private messageId = 1;
+  private pendingRequests = new Map<number, {
+    resolve: (value: any) => void;
+    reject: (error: Error) => void;
+    onProgress?: (progress: any) => void;
+  }>();
 
   constructor() {
+    this.db = DatabaseService.getInstance();
     // Start periodic health checking
     this.startHealthMonitoring();
   }
@@ -108,8 +118,38 @@ export class MultiMcpClient {
         throw new Error(`Server ${serverConfig.serverId} is unhealthy: ${health.status}`);
       }
 
-      // Get or cache credentials
-      const credentials = await this.getExecutionCredentials(request);
+      // Handle authentication based on MCP server configuration
+      let authData;
+      
+      // Check if MCP server is configured for session-based authentication
+      const configValues = typeof serverConfig.configuration_values === 'string' 
+        ? JSON.parse(serverConfig.configuration_values) 
+        : serverConfig.configuration_values;
+      
+      let authMode = configValues?.authMode || 'credentials'; // Default to credentials for backward compatibility
+      
+      // Force session mode if we have session data available (override config)
+      if (request.sessionToken && request.userInfo) {
+        authMode = 'session';
+      }
+      
+      if (authMode === 'session' && request.sessionToken && request.userInfo) {
+        // Session-based authentication
+        console.log(`[Multi MCP Client] Using session-based authentication for user: ${request.userInfo.username}`);
+        authData = {
+          sessionToken: request.sessionToken,
+          baseUrl: request.userInfo.baseUrl,
+          username: request.userInfo.username,
+          instanceId: request.userInfo.instanceId
+        };
+      } else if (authMode === 'session' && (!request.sessionToken || !request.userInfo)) {
+        // Session mode but no session data available
+        throw new Error('MCP server configured for session-based authentication but no session token provided. Please authenticate first.');
+      } else {
+        // Credential-based authentication
+        console.log(`[Multi MCP Client] Using credential-based authentication (authMode: ${authMode})`);
+        authData = await this.getExecutionCredentials(request);
+      }
 
       // Execute the tool call
       const result = await this.executeOnServer(serverDefinition, serverConfig, {
@@ -120,10 +160,10 @@ export class MultiMcpClient {
           connection_id: request.connectionId,
           agent_id: request.agentId,
           enabled_servers: request.enabledMcpServers,
-          // Pass credentials as archer_connection for MCP server compatibility
-          archer_connection: credentials
+          // Pass auth data as archer_connection for MCP server compatibility
+          archer_connection: authData
         },
-        credentials
+        credentials: authData
       });
 
       const processingTime = Date.now() - startTime;
@@ -260,10 +300,11 @@ export class MultiMcpClient {
   }
 
   /**
-   * Get tools from a specific MCP server
+   * Get tools from a specific MCP server via SSE
    */
   private async getServerTools(serverDefinition: McpServerDefinition, serverConfig: TenantMcpServerConfiguration): Promise<McpTool[]> {
     try {
+      // For SSE servers, use the direct /tools endpoint
       const response = await fetch(`${serverDefinition.endpoint}/tools`, {
         method: 'GET',
         headers: {
@@ -313,27 +354,69 @@ export class MultiMcpClient {
   }
 
   /**
-   * Execute tool on a specific server
+   * Execute tool on a specific server via SSE
    */
   private async executeOnServer(serverDefinition: McpServerDefinition, serverConfig: TenantMcpServerConfiguration, request: any): Promise<any> {
-    const response = await fetch(`${serverDefinition.endpoint}/call`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+    // Get or create SSE connection for this server
+    const connection = await this.getSSEConnection(serverDefinition);
+    
+    // Prepare MCP JSON-RPC request
+    const requestId = this.messageId++;
+    const mcpRequest = {
+      jsonrpc: '2.0',
+      id: requestId,
+      method: 'tools/call',
+      params: {
         name: request.toolName,
-        arguments: request.arguments,
-        credentials: request.credentials
-      }),
-      signal: AbortSignal.timeout(serverConfig.serverConfig.timeout)
+        arguments: {
+          ...request.arguments,
+          // Include auth data for MCP server compatibility
+          archer_connection: request.credentials
+        }
+      }
+    };
+
+    console.log(`[Multi MCP Client] Executing tool via SSE: ${request.toolName}`);
+
+    return new Promise(async (resolve, reject) => {
+      // Store request for response handling
+      this.pendingRequests.set(requestId, {
+        resolve,
+        reject,
+        onProgress: request.onProgress
+      });
+
+      // Set timeout
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(requestId);
+        reject(new Error(`Tool call timeout: ${request.toolName}`));
+      }, serverConfig.serverConfig.timeout || 30000);
+
+      try {
+        // Send request via POST to SSE server
+        const response = await fetch(connection.messageEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(mcpRequest)
+        });
+
+        if (!response.ok) {
+          clearTimeout(timeout);
+          this.pendingRequests.delete(requestId);
+          reject(new Error(`HTTP request failed: ${response.status}`));
+        }
+
+        // Response will come via SSE stream
+        console.log(`[Multi MCP Client] Request sent, waiting for SSE response...`);
+        
+      } catch (error) {
+        clearTimeout(timeout);
+        this.pendingRequests.delete(requestId);
+        reject(error);
+      }
     });
-
-    if (!response.ok) {
-      throw new Error(`Tool execution failed: ${response.status} ${response.statusText}`);
-    }
-
-    return await response.json();
   }
 
   /**
@@ -346,13 +429,57 @@ export class MultiMcpClient {
       return request.credentials;
     }
 
-    // Get cached credentials
-    const credentials = await credentialsManager.getCredentials(request.tenantId, request.connectionId);
-    if (!credentials) {
-      throw new Error('Credentials must be provided for MCP tool calls');
-    }
+    // For MCP server execution, we need the REAL decrypted password from the database
+    // Get the actual credential from database with decrypted password
+    try {
+      const credentialResult = await this.db.query(`
+        SELECT 
+          credential_id as id,
+          name,
+          base_url as baseUrl,
+          username,
+          encrypted_password,
+          instance_id as instanceId,
+          instance_name as instanceName,
+          user_domain_id as userDomainId,
+          is_default as isDefault,
+          created_at as created,
+          last_tested_at as lastTested,
+          test_status as status,
+          last_error as lastError
+        FROM connection_credentials 
+        WHERE credential_id = ? AND tenant_id = ? AND deleted_at IS NULL
+        LIMIT 1
+      `, [request.connectionId, request.tenantId]);
 
-    return credentials;
+      if (credentialResult.length === 0) {
+        throw new Error(`Connection credential ${request.connectionId} not found for tenant ${request.tenantId}`);
+      }
+
+      const credential = credentialResult[0];
+      
+      // Decrypt password (simple decryption - remove 'encrypted_' prefix)
+      const decryptedPassword = credential.encrypted_password?.replace('encrypted_', '') || '';
+      
+      return {
+        id: credential.id,
+        name: credential.name,
+        baseUrl: credential.baseUrl,
+        username: credential.username,
+        password: decryptedPassword, // Real decrypted password for MCP server
+        instanceId: credential.instanceId,
+        instanceName: credential.instanceName,
+        userDomainId: credential.userDomainId || '1',
+        isDefault: credential.isDefault === 1,
+        created: credential.created,
+        lastTested: credential.lastTested,
+        status: credential.status === 'success' ? 'connected' : 'disconnected',
+        lastError: credential.lastError
+      };
+    } catch (error) {
+      console.error(`[Multi MCP Client] Failed to load credentials for connection ${request.connectionId}:`, error);
+      throw new Error('Failed to load credentials for MCP tool execution');
+    }
   }
 
   /**
@@ -365,13 +492,98 @@ export class MultiMcpClient {
   }
 
   /**
+   * Get or create SSE connection for a server
+   */
+  private async getSSEConnection(serverDefinition: McpServerDefinition): Promise<SSEServerConnection> {
+    const existingConnection = this.serverConnections.get(serverDefinition.id);
+    
+    if (existingConnection?.isConnected) {
+      return existingConnection;
+    }
+
+    console.log(`[Multi MCP Client] Establishing SSE connection to ${serverDefinition.id}...`);
+
+    return new Promise((resolve, reject) => {
+      const eventSource = new EventSource(`${serverDefinition.endpoint}/sse`);
+      
+      eventSource.onopen = () => {
+        console.log(`[Multi MCP Client] SSE connection established for ${serverDefinition.id}`);
+      };
+
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log(`[Multi MCP Client] Received SSE message from ${serverDefinition.id}:`, data);
+
+          // Handle endpoint announcement (first message)
+          if (data.type === 'endpoint') {
+            const connection: SSEServerConnection = {
+              serverId: serverDefinition.id,
+              sessionId: data.sessionId,
+              eventSource,
+              messageEndpoint: `${serverDefinition.endpoint}/messages/${data.sessionId}`,
+              isConnected: true,
+              lastUsed: new Date().toISOString(),
+              errorCount: 0
+            };
+
+            this.serverConnections.set(serverDefinition.id, connection);
+            console.log(`[Multi MCP Client] Session established for ${serverDefinition.id}: ${data.sessionId}`);
+            resolve(connection);
+          }
+          // Handle tool responses
+          else if (data.id && this.pendingRequests.has(data.id)) {
+            const request = this.pendingRequests.get(data.id)!;
+            
+            if (data.error) {
+              request.reject(new Error(data.error.message || 'MCP tool call failed'));
+            } else {
+              request.resolve(data.result);
+            }
+            
+            this.pendingRequests.delete(data.id);
+          }
+          // Handle progress updates
+          else if (data.type === 'progress' && data.requestId && this.pendingRequests.has(data.requestId)) {
+            const request = this.pendingRequests.get(data.requestId);
+            if (request?.onProgress) {
+              request.onProgress({
+                tool: data.tool,
+                progress: data.progress,
+                status: data.status,
+                data: data.data,
+                timestamp: new Date().toISOString()
+              });
+            }
+          }
+        } catch (error) {
+          console.error(`[Multi MCP Client] Error parsing SSE message from ${serverDefinition.id}:`, error);
+        }
+      };
+
+      eventSource.onerror = (error) => {
+        console.error(`[Multi MCP Client] SSE connection error for ${serverDefinition.id}:`, error);
+        this.serverConnections.delete(serverDefinition.id);
+        reject(new Error(`Failed to establish SSE connection to ${serverDefinition.id}`));
+      };
+
+      // Connection timeout
+      setTimeout(() => {
+        if (!this.serverConnections.has(serverDefinition.id)) {
+          eventSource.close();
+          reject(new Error(`SSE connection timeout for ${serverDefinition.id}`));
+        }
+      }, 10000);
+    });
+  }
+
+  /**
    * Start periodic health monitoring for all servers
    */
   private startHealthMonitoring(): void {
     setInterval(async () => {
       try {
-        // Clear cache to force fresh health checks
-        this.serverHealthCache.clear();
+        // Let cache expire naturally instead of forcing clears - this improves performance
         console.log('[Multi MCP Client] Performing periodic health check');
       } catch (error) {
         console.error('[Multi MCP Client] Error during periodic health check:', error);
@@ -409,9 +621,12 @@ export class MultiMcpClient {
   }
 }
 
-interface ServerConnection {
-  endpoint: string;
-  connected: boolean;
+interface SSEServerConnection {
+  serverId: string;
+  sessionId: string;
+  eventSource: EventSource;
+  messageEndpoint: string;
+  isConnected: boolean;
   lastUsed: string;
   errorCount: number;
 }

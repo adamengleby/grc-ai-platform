@@ -3,12 +3,17 @@ import { clsx } from 'clsx';
 
 const Card = React.forwardRef<
   HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
+  React.HTMLAttributes<HTMLDivElement> & {
+    variant?: 'default' | 'clean' | 'elevated' | 'gradient';
+  }
+>(({ className, variant = 'default', ...props }, ref) => (
   <div
     ref={ref}
     className={clsx(
-      'rounded-lg border bg-card text-card-foreground shadow-sm',
+      variant === 'clean' && 'card-clean',
+      variant === 'elevated' && 'card-elevated', 
+      variant === 'gradient' && 'card-gradient',
+      variant === 'default' && 'card',
       className
     )}
     {...props}

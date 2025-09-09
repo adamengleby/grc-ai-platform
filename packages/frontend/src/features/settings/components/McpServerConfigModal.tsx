@@ -13,8 +13,8 @@ import {
   Database,
   Info
 } from 'lucide-react';
-import { ArcherCredentials, getAllCredentials } from '@/lib/credentialsApi';
-import credentialsManager from '@/lib/credentialsApi';
+import { ArcherCredentials, getAllCredentials } from '@/lib/backendCredentialsApi';
+import { credentialsManager } from '@/lib/backendCredentialsApi';
 import { useAuthStore } from '@/app/store/auth';
 
 interface McpServerConfigModalProps {
@@ -74,6 +74,10 @@ export default function McpServerConfigModal({
 
     setIsLoading(true);
     try {
+      // Set tenant context for credentials manager
+      credentialsManager.setTenantContext(tenant.id);
+      await credentialsManager.initialize();
+      
       const connections = await getAllCredentials();
       setAvailableConnections(connections);
     } catch (error) {
@@ -96,6 +100,11 @@ export default function McpServerConfigModal({
     setMessage({ type: 'info', text: `Testing connection to ${selectedConnection.name}...` });
 
     try {
+      // Ensure tenant context is set for credentials manager
+      if (tenant) {
+        credentialsManager.setTenantContext(tenant.id);
+      }
+      
       // Use the credentials manager to test the connection
       const testResult = await credentialsManager.testConnection(selectedConnection);
       

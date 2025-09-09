@@ -109,9 +109,16 @@ export interface McpToolExecutionRequest {
   arguments: Record<string, any>;
   tenantId: string;
   agentId?: string;
-  connectionId: string;
-  credentials?: any;
+  connectionId?: string; // Optional now since we're using session tokens
+  credentials?: any; // Deprecated - keeping for backward compatibility
   enabledMcpServers?: string[];
+  // New session-based authentication
+  sessionToken?: string;
+  userInfo?: {
+    username: string;
+    instanceId: string;
+    baseUrl: string;
+  };
 }
 
 export interface McpToolExecutionResult {

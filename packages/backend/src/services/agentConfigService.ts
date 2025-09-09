@@ -1,5 +1,6 @@
 import { McpServerDefinition, TenantMcpServerConfiguration } from '../types/mcp';
 import { AIAgent } from '../types/agent';
+import { DatabaseService } from './databaseService';
 
 /**
  * Agent Configuration Service
@@ -7,6 +8,11 @@ import { AIAgent } from '../types/agent';
  * Implements proper tenant isolation and security validation
  */
 export class AgentConfigService {
+  private db: DatabaseService;
+
+  constructor() {
+    this.db = DatabaseService.getInstance();
+  }
   
   /**
    * Load agent configuration with tenant validation
@@ -18,14 +24,58 @@ export class AgentConfigService {
       throw new Error('Tenant ID and Agent ID are required');
     }
 
-    // Validate tenant access (in production, this would check against database/cache)
-    if (!this.validateTenantAccess(tenantId, agentId)) {
+    // Validate tenant access by checking database
+    if (!(await this.validateTenantAccess(tenantId, agentId))) {
       throw new Error(`Agent ${agentId} does not belong to tenant ${tenantId}`);
     }
 
-    // For now, return a mock configuration based on the agent ID pattern
-    // In production, this would query Cosmos DB with tenant partitioning
-    return this.getMockAgentConfiguration(tenantId, agentId);
+    // Query database for actual agent configuration
+    try {
+      const result = await this.db.query(`
+        SELECT 
+          agent_id as id,
+          name,
+          description,
+          persona,
+          system_prompt as systemPrompt,
+          llm_config_id as llmConfigId,
+          enabled_mcp_servers as enabledMcpServers,
+          is_enabled as isEnabled,
+          created_at as createdAt,
+          usage_count as usageCount
+        FROM ai_agents 
+        WHERE agent_id = ? AND tenant_id = ? AND deleted_at IS NULL
+        LIMIT 1
+      `, [agentId, tenantId]);
+      
+      if (result.length === 0) {
+        return null;
+      }
+      
+      const agent = result[0];
+      
+      // Parse enabled MCP servers (stored as JSON string)
+      let enabledMcpServers = [];
+      if (agent.enabledMcpServers) {
+        try {
+          enabledMcpServers = JSON.parse(agent.enabledMcpServers);
+        } catch (e) {
+          console.warn(`[Agent Config] Failed to parse enabledMcpServers for agent ${agentId}:`, e);
+        }
+      }
+      
+      return {
+        ...agent,
+        enabledMcpServers,
+        capabilities: ['grc-analysis', 'data-retrieval'], // Default capabilities
+        useCase: 'comprehensive-grc-analysis',
+        avatar: 'default',
+        color: 'blue'
+      };
+    } catch (error) {
+      console.error(`[Agent Config] Error loading agent configuration for ${agentId}:`, error);
+      return null;
+    }
   }
 
   /**
@@ -81,39 +131,20 @@ export class AgentConfigService {
    * @param tenantId - Tenant ID
    * @param agentId - Agent ID  
    */
-  private validateTenantAccess(tenantId: string, agentId: string): boolean {
-    // In production, this would query the database:
-    // SELECT tenant_id FROM agents WHERE id = @agentId
-    // For now, check against mock data with tenant association
-    
-    const mockAgentTenantMappings = new Map([
-      // Legacy format support (for backward compatibility)
-      ['agent-grc-analyst-tenant-acme', 'tenant-acme'],
-      ['agent-risk-specialist-tenant-acme', 'tenant-acme'],
-      ['agent-compliance-auditor-tenant-acme', 'tenant-acme'],
-      ['agent-executive-advisor-tenant-acme', 'tenant-acme'],
+  private async validateTenantAccess(tenantId: string, agentId: string): Promise<boolean> {
+    try {
+      // Query the database to check if the agent belongs to the tenant
+      const result = await this.db.query(`
+        SELECT tenant_id FROM ai_agents 
+        WHERE agent_id = ? AND tenant_id = ? AND deleted_at IS NULL
+        LIMIT 1
+      `, [agentId, tenantId]);
       
-      // Current UUID-based agents (temporary - would be stored in database in production)
-      ['agent-29078b07-3e92-4c64-9f4c-6e4bc4fdce1e', 'tenant-acme'],
-    ]);
-
-    // Check explicit mapping first
-    const mappedTenant = mockAgentTenantMappings.get(agentId);
-    if (mappedTenant) {
-      return mappedTenant === tenantId;
+      return result.length > 0;
+    } catch (error) {
+      console.error(`[Agent Config] Error validating tenant access for agent ${agentId}:`, error);
+      return false;
     }
-
-    // Fallback: Try to extract tenant from legacy ID pattern for backward compatibility
-    const legacyMatch = agentId.match(/tenant-([^-]+)/);
-    if (legacyMatch) {
-      const extractedTenant = legacyMatch[1];
-      return extractedTenant === tenantId.replace('tenant-', '');
-    }
-
-    // For new UUID agents, always require explicit tenant validation
-    // In production, this would be a database lookup
-    console.warn(`[Agent Config] Agent ${agentId} not found in tenant mappings - would query database in production`);
-    return false;
   }
 
   /**
@@ -193,7 +224,7 @@ export class AgentConfigService {
       'archer-mcp-server': {
         name: 'Archer GRC MCP Server',
         description: 'RSA Archer GRC Platform integration server',
-        endpoint: 'http://localhost:3002',
+        endpoint: 'http://localhost:3006',
         capabilities: ['archer_applications', 'archer_records', 'archer_stats']
       },
       'compliance-mcp-server': {

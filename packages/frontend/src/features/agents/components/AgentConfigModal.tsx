@@ -16,9 +16,11 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { useAuthStore } from '../../../app/store/auth';
-import { AIAgent, AGENT_PRESETS, AGENT_CAPABILITIES } from '../../../types/agent';
-import { createAgentService } from '../../../lib/agentService';
+import { AIAgent, AGENT_PRESETS } from '../../../types/agent';
+import { createAgentService } from '../../../lib/backendAgentService';
 import { createAgentMetricsService } from '../../../lib/agentMetricsService';
+import { backendLLMService } from '../../../lib/backendLLMService';
+import { mcpConfigsManager } from '../../../lib/backendMcpConfigsApi';
 
 interface AgentConfigModalProps {
   open: boolean;
@@ -29,7 +31,7 @@ interface AgentConfigModalProps {
   onSave: () => void;
 }
 
-type TabType = 'general' | 'persona' | 'capabilities' | 'integrations' | 'performance';
+type TabType = 'general' | 'persona' | 'integrations' | 'performance';
 
 const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
   open,
@@ -70,20 +72,42 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
     if (!tenantId || !open) return;
 
     // Load LLM configurations
-    const llmStorageKey = `user_llm_configs_${tenantId}`;
-    const storedLlmConfigs = localStorage.getItem(llmStorageKey);
-    if (storedLlmConfigs) {
-      const configs = JSON.parse(storedLlmConfigs);
-      setAvailableLlmConfigs(configs);
-    }
+    const loadLlmConfigs = async () => {
+      try {
+        const configs = await backendLLMService.getAllLlmConfigs();
+        setAvailableLlmConfigs(configs);
+      } catch (error) {
+        console.error('Error loading LLM configurations:', error);
+      }
+    };
+    loadLlmConfigs();
 
-    // Load MCP servers
-    const mcpStorageKey = `tenant_mcp_servers_${tenantId}`;
-    const storedMcpServers = localStorage.getItem(mcpStorageKey);
-    if (storedMcpServers) {
-      const servers = JSON.parse(storedMcpServers);
-      setAvailableMcpServers(servers);
-    }
+    // Load MCP servers from database
+    const loadMcpServers = async () => {
+      try {
+        mcpConfigsManager.setTenantContext(tenantId);
+        const mcpConfigs = await mcpConfigsManager.getAllMcpConfigs();
+        
+        // Transform database format to match existing interface
+        const servers = mcpConfigs.map(config => ({
+          id: config.server_id,
+          name: config.display_name || config.custom_name || config.server_name,
+          description: config.description,
+          isEnabled: config.is_enabled,
+          category: config.category,
+          server_type: config.server_type,
+          available_tools: config.available_tools || [],
+          tenant_server_id: config.tenant_server_id
+        }));
+        
+        setAvailableMcpServers(servers);
+        console.log('✅ [AgentConfigModal] Loaded MCP servers from database:', servers);
+      } catch (error) {
+        console.error('❌ [AgentConfigModal] Failed to load MCP servers from database:', error);
+        setAvailableMcpServers([]);
+      }
+    };
+    loadMcpServers();
 
     // Load agent metrics if editing
     if (isEditing && agent) {
@@ -99,14 +123,14 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
       setFormData({
         name: agent.name,
         description: agent.description,
-        persona: agent.persona,
+        persona: (agent as any).persona || '',
         systemPrompt: agent.systemPrompt,
-        llmConfigId: agent.llmConfigId,
-        enabledMcpServers: agent.enabledMcpServers,
-        capabilities: agent.capabilities,
-        useCase: agent.useCase,
-        avatar: agent.avatar || '🤖',
-        color: agent.color || '#2563eb',
+        llmConfigId: (agent as any).llmConfigId || '',
+        enabledMcpServers: (agent as any).enabledMcpServers || [],
+        capabilities: (agent as any).capabilities || [],
+        useCase: (agent as any).useCase || '',
+        avatar: (agent as any).avatar || '🤖',
+        color: (agent as any).color || '#2563eb',
         isEnabled: agent.isEnabled
       });
     } else {
@@ -146,22 +170,17 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
     }
   };
 
-  const handleCapabilityToggle = (capabilityId: string) => {
-    setFormData(prev => ({
-      ...prev,
-      capabilities: prev.capabilities.includes(capabilityId)
-        ? prev.capabilities.filter(id => id !== capabilityId)
-        : [...prev.capabilities, capabilityId]
-    }));
-  };
 
   const handleMcpServerToggle = (serverId: string) => {
-    setFormData(prev => ({
-      ...prev,
-      enabledMcpServers: prev.enabledMcpServers.includes(serverId)
-        ? prev.enabledMcpServers.filter(id => id !== serverId)
-        : [...prev.enabledMcpServers, serverId]
-    }));
+    setFormData(prev => {
+      const currentServers = prev.enabledMcpServers || [];
+      return {
+        ...prev,
+        enabledMcpServers: currentServers.includes(serverId)
+          ? currentServers.filter(id => id !== serverId)
+          : [...currentServers, serverId]
+      };
+    });
   };
 
   const handleSave = async () => {
@@ -175,7 +194,7 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
       return;
     }
 
-    if (formData.enabledMcpServers.length === 0) {
+    if ((formData.enabledMcpServers || []).length === 0) {
       setMessage({ type: 'error', text: 'At least one MCP server must be enabled' });
       return;
     }
@@ -234,7 +253,6 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
   const tabs = [
     { id: 'general' as TabType, label: 'General', icon: Bot },
     { id: 'persona' as TabType, label: 'Persona', icon: User },
-    { id: 'capabilities' as TabType, label: 'Capabilities', icon: Sparkles },
     { id: 'integrations' as TabType, label: 'Integrations', icon: Database },
     { id: 'performance' as TabType, label: 'Performance', icon: Activity }
   ];
@@ -455,41 +473,6 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
             </div>
           )}
 
-          {/* Capabilities Tab */}
-          {activeTab === 'capabilities' && (
-            <div className="space-y-6">
-              <div>
-                <h3 className="text-lg font-medium mb-4">Agent Capabilities</h3>
-                <p className="text-sm text-gray-600 mb-4">
-                  Select the capabilities this agent should have. These define what the agent is good at.
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {AGENT_CAPABILITIES.map((capability) => (
-                    <div
-                      key={capability.id}
-                      className={`p-4 border rounded-lg cursor-pointer transition-all ${
-                        formData.capabilities.includes(capability.id)
-                          ? 'border-blue-500 bg-blue-50'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                      onClick={() => handleCapabilityToggle(capability.id)}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="font-medium">{capability.name}</h4>
-                        {formData.capabilities.includes(capability.id) && (
-                          <CheckCircle className="h-5 w-5 text-blue-500" />
-                        )}
-                      </div>
-                      <p className="text-sm text-gray-600">{capability.description}</p>
-                      <Badge variant="outline" className="mt-2 text-xs">
-                        {capability.category}
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Integrations Tab */}
           {activeTab === 'integrations' && (
@@ -531,7 +514,7 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
                       <div
                         key={server.id}
                         className={`p-3 border rounded-lg cursor-pointer transition-all ${
-                          formData.enabledMcpServers.includes(server.id)
+                          (formData.enabledMcpServers || []).includes(server.id)
                             ? 'border-blue-500 bg-blue-50'
                             : 'border-gray-200 hover:border-gray-300'
                         }`}
@@ -542,7 +525,7 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
                             <h4 className="font-medium">{server.name}</h4>
                             <p className="text-sm text-gray-600">{server.description}</p>
                           </div>
-                          {formData.enabledMcpServers.includes(server.id) && (
+                          {(formData.enabledMcpServers || []).includes(server.id) && (
                             <CheckCircle className="h-5 w-5 text-blue-500" />
                           )}
                         </div>
@@ -620,8 +603,8 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
                     <div>
                       <h4 className="font-medium mb-3">Frequently Used Tools</h4>
                       <div className="flex flex-wrap gap-2">
-                        {agentMetrics.toolsUsed.map((tool: string) => (
-                          <Badge key={tool} variant="outline" className="text-xs">
+                        {agentMetrics.toolsUsed.map((tool: string, index: number) => (
+                          <Badge key={`agent-tools-${tool}-${index}`} variant="outline" className="text-xs">
                             {tool.replace(/_/g, ' ')}
                           </Badge>
                         ))}

@@ -1,0 +1,317 @@
+/**
+ * Local Development Analytics Controller
+ * Gradually replaces mock data with real Archer data
+ */
+
+import { Request, Response } from 'express';
+import { AnalyticsService } from '../services/analyticsService';
+import { MCPClient } from '../services/mcpClient';
+import { DataTransformationService } from '../services/dataTransformationService';
+
+export class LocalAnalyticsController {
+  private analyticsService: AnalyticsService;
+  private mcpClient: MCPClient;
+  private dataTransformer: DataTransformationService;
+
+  constructor() {
+    this.analyticsService = new AnalyticsService();
+    this.mcpClient = new MCPClient();
+    this.dataTransformer = new DataTransformationService();
+  }
+
+  /**
+   * Get Real-time Metrics - Enhanced with real data
+   * Matches existing frontend API contract exactly
+   */
+  async getRealTimeMetrics(req: Request, res: Response): Promise<void> {
+    try {
+      const tenantId = req.headers['x-tenant-id'] as string || 'default';
+      
+      // Feature flag: Use real data if available, fallback to mock
+      const useRealData = process.env.USE_REAL_ARCHER_DATA === 'true';
+      
+      let metrics;
+      if (useRealData) {
+        // Get real data from Archer via MCP
+        const archerData = await this.mcpClient.getRecentEvents(tenantId, {
+          limit: 100,
+          timeRange: { hours: 1 }
+        });
+        
+        // Transform to match frontend expectations
+        metrics = await this.dataTransformer.transformToRealTimeMetrics(
+          archerData, 
+          tenantId
+        );
+      } else {
+        // Use enhanced mock data with more realistic patterns
+        metrics = await this.generateEnhancedMockMetrics(tenantId);
+      }
+
+      // Response format matches existing frontend exactly
+      res.json({
+        success: true,
+        data: metrics,
+        timestamp: new Date().toISOString(),
+        source: useRealData ? 'archer_live' : 'mock_enhanced'
+      });
+
+    } catch (error) {
+      console.error('Error in getRealTimeMetrics:', error);
+      
+      // Fallback to mock data on error (prevents frontend breaking)
+      const fallbackMetrics = await this.generateEnhancedMockMetrics('default');
+      
+      res.json({
+        success: true,
+        data: fallbackMetrics,
+        timestamp: new Date().toISOString(),
+        source: 'fallback_mock',
+        warning: 'Using fallback data due to service error'
+      });
+    }
+  }
+
+  /**
+   * Get Risk Analytics - Progressive enhancement
+   */
+  async getRiskAnalytics(req: Request, res: Response): Promise<void> {
+    try {
+      const tenantId = req.headers['x-tenant-id'] as string || 'default';
+      const timeRange = req.query.timeRange as string || '30d';
+      
+      // Check if we have cached real data
+      const cachedData = await this.analyticsService.getCachedRiskAnalytics(
+        tenantId, 
+        timeRange
+      );
+      
+      if (cachedData) {
+        return res.json({
+          success: true,
+          data: cachedData,
+          source: 'cache',
+          cached: true
+        });
+      }
+
+      // Try to get fresh data from Archer
+      const useRealData = await this.checkArcherConnectivity(tenantId);
+      
+      let riskAnalytics;
+      if (useRealData) {
+        const archerRisks = await this.mcpClient.getRiskData(tenantId, {
+          timeRange: timeRange
+        });
+        
+        riskAnalytics = await this.dataTransformer.transformToRiskAnalytics(
+          archerRisks,
+          tenantId
+        );
+        
+        // Cache for 5 minutes
+        await this.analyticsService.cacheRiskAnalytics(
+          tenantId, 
+          timeRange, 
+          riskAnalytics, 
+          300
+        );
+        
+      } else {
+        riskAnalytics = await this.generateEnhancedMockRiskAnalytics(tenantId);
+      }
+
+      res.json({
+        success: true,
+        data: riskAnalytics,
+        source: useRealData ? 'archer_live' : 'mock_enhanced'
+      });
+
+    } catch (error) {
+      console.error('Error in getRiskAnalytics:', error);
+      
+      const fallbackData = await this.generateEnhancedMockRiskAnalytics('default');
+      res.json({
+        success: true,
+        data: fallbackData,
+        source: 'fallback_mock'
+      });
+    }
+  }
+
+  /**
+   * Get ML Model Status - New endpoint for model management
+   */
+  async getMLModels(req: Request, res: Response): Promise<void> {
+    try {
+      const tenantId = req.headers['x-tenant-id'] as string || 'default';
+      
+      // Check local ML service status
+      const models = await this.analyticsService.getAvailableModels(tenantId);
+      
+      res.json({
+        success: true,
+        data: models,
+        source: 'local_ml_service'
+      });
+
+    } catch (error) {
+      console.error('Error in getMLModels:', error);
+      
+      // Return mock model data
+      res.json({
+        success: true,
+        data: this.getMockMLModels(),
+        source: 'mock'
+      });
+    }
+  }
+
+  /**
+   * Enhanced mock data with realistic patterns
+   */
+  private async generateEnhancedMockMetrics(tenantId: string) {
+    const now = new Date();
+    const baseMetrics = {
+      tenantId,
+      timestamp: now,
+      metrics: {
+        eventsPerSecond: this.generateRealisticValue(15, 45, now),
+        totalEventsToday: this.generateRealisticValue(1200, 4800, now),
+        errorRate: this.generateRealisticValue(0.5, 3.2, now),
+        averageProcessingTime: this.generateRealisticValue(45, 120, now),
+        
+        // More realistic event type distribution
+        topEventTypes: [
+          { 
+            type: 'RISK_ASSESSMENT_UPDATED', 
+            count: this.generateRealisticValue(120, 340, now), 
+            percentage: 28.5 
+          },
+          { 
+            type: 'CONTROL_TEST_COMPLETED', 
+            count: this.generateRealisticValue(89, 267, now), 
+            percentage: 22.1 
+          },
+          { 
+            type: 'INCIDENT_REPORTED', 
+            count: this.generateRealisticValue(56, 189, now), 
+            percentage: 15.7 
+          },
+          { 
+            type: 'COMPLIANCE_REVIEW', 
+            count: this.generateRealisticValue(34, 134, now), 
+            percentage: 11.2 
+          },
+          { 
+            type: 'POLICY_UPDATE', 
+            count: this.generateRealisticValue(23, 98, now), 
+            percentage: 8.9 
+          }
+        ],
+        
+        // Business hours realistic trends
+        riskTrends: {
+          highRiskIncreasing: this.isBusinessHours(now) ? 
+            this.generateRealisticValue(15, 35, now) : 
+            this.generateRealisticValue(5, 15, now),
+          criticalIncidents: this.generateRealisticValue(2, 8, now),
+          complianceGaps: this.generateRealisticValue(8, 23, now),
+          controlFailures: this.generateRealisticValue(3, 12, now)
+        }
+      }
+    };
+
+    return baseMetrics;
+  }
+
+  /**
+   * Generate time-aware realistic values
+   */
+  private generateRealisticValue(min: number, max: number, timestamp: Date): number {
+    const hour = timestamp.getHours();
+    const dayOfWeek = timestamp.getDay();
+    
+    // Business hours multiplier (9 AM - 5 PM, Mon-Fri)
+    let multiplier = 1;
+    if (dayOfWeek >= 1 && dayOfWeek <= 5 && hour >= 9 && hour <= 17) {
+      multiplier = 1.4; // Higher activity during business hours
+    } else if (dayOfWeek === 0 || dayOfWeek === 6) {
+      multiplier = 0.3; // Lower weekend activity
+    } else {
+      multiplier = 0.6; // Evening/night activity
+    }
+    
+    const range = max - min;
+    const baseValue = min + (Math.random() * range);
+    return Math.round(baseValue * multiplier);
+  }
+
+  private isBusinessHours(date: Date): boolean {
+    const hour = date.getHours();
+    const dayOfWeek = date.getDay();
+    return dayOfWeek >= 1 && dayOfWeek <= 5 && hour >= 9 && hour <= 17;
+  }
+
+  /**
+   * Check if Archer is accessible for this tenant
+   */
+  private async checkArcherConnectivity(tenantId: string): Promise<boolean> {
+    try {
+      const result = await this.mcpClient.healthCheck(tenantId);
+      return result.status === 'healthy';
+    } catch (error) {
+      console.warn(`Archer connectivity check failed for tenant ${tenantId}:`, error);
+      return false;
+    }
+  }
+
+  private async generateEnhancedMockRiskAnalytics(tenantId: string) {
+    // Enhanced mock risk data with realistic patterns
+    return {
+      totalRisks: 247,
+      highRisks: 34,
+      criticalRisks: 12,
+      riskTrend: 'stable' as const,
+      riskDistribution: [
+        { category: 'Operational', count: 89, averageScore: 6.7 },
+        { category: 'Technology', count: 67, averageScore: 7.2 },
+        { category: 'Financial', count: 45, averageScore: 5.9 },
+        { category: 'Compliance', count: 34, averageScore: 6.8 },
+        { category: 'Strategic', count: 12, averageScore: 8.1 }
+      ],
+      topRisks: [
+        {
+          id: 'RSK-2024-001',
+          title: 'Third-Party Vendor Data Security',
+          score: 8.7,
+          category: 'Technology',
+          lastUpdated: new Date(Date.now() - 2 * 60 * 60 * 1000),
+          trend: 'up' as const
+        },
+        {
+          id: 'RSK-2024-002', 
+          title: 'Regulatory Compliance Gap - GDPR',
+          score: 8.2,
+          category: 'Compliance',
+          lastUpdated: new Date(Date.now() - 4 * 60 * 60 * 1000),
+          trend: 'stable' as const
+        }
+      ]
+    };
+  }
+
+  private getMockMLModels() {
+    return [
+      {
+        id: 'model-risk-pred-local',
+        name: 'Local Risk Prediction Model',
+        type: 'risk_prediction',
+        status: 'training',
+        accuracy: 0.847,
+        lastTrained: new Date(Date.now() - 24 * 60 * 60 * 1000),
+        version: '1.0.0-local'
+      }
+    ];
+  }
+}

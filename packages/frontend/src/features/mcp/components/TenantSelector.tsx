@@ -80,8 +80,8 @@ const mapTenantIdToMcpFormat = (authTenantId: string): string => {
   switch (authTenantId) {
     case 'tenant-fintech':
       return 'tenant-fintech-001';
-    case 'tenant-acme':
-      return 'tenant-acme'; // Keep original tenant ID
+    case 'A1B2C3D4-E5F6-7G8H-9I0J-K1L2M3N4O5P6':
+      return 'A1B2C3D4-E5F6-7G8H-9I0J-K1L2M3N4O5P6'; // Keep original tenant ID
     case 'tenant-healthcare':
       return 'tenant-healthcare-002';
     default:

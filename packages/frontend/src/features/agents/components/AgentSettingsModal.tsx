@@ -16,8 +16,8 @@ import {
   AlertCircle,
   Shield
 } from 'lucide-react';
-import { AIAgent, AGENT_CAPABILITIES } from '../../../types/agent';
-import { createAgentService } from '../../../lib/agentService';
+import { AIAgent } from '../../../types/agent';
+import { createAgentService } from '../../../lib/backendAgentService';
 
 interface AgentSettingsModalProps {
   agent: AIAgent | null;
@@ -49,17 +49,21 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({
 
   const loadAvailableConfigs = async () => {
     try {
-      // Load available LLM configs
-      const llmStorageKey = `user_llm_configs_${tenantId}`;
-      const llmConfigs = JSON.parse(localStorage.getItem(llmStorageKey) || '[]');
-      setAvailableLlmConfigs(llmConfigs);
+      // Load available LLM configs from database API
+      const llmResponse = await fetch('/api/v1/simple-llm-configs');
+      const llmData = await llmResponse.json();
+      if (llmData.success) {
+        setAvailableLlmConfigs(llmData.data.llm_configs || []);
+      }
 
-      // Load available MCP servers
-      const mcpStorageKey = `tenant_mcp_servers_${tenantId}`;
-      const mcpServers = JSON.parse(localStorage.getItem(mcpStorageKey) || '[]');
-      setAvailableMcpServers(mcpServers);
+      // Load available MCP servers from database API
+      const mcpResponse = await fetch('/api/v1/simple-mcp-configs');
+      const mcpData = await mcpResponse.json();
+      if (mcpData.success) {
+        setAvailableMcpServers(mcpData.data.mcp_servers || []);
+      }
     } catch (error) {
-      console.error('Error loading configurations:', error);
+      console.error('Error loading configurations from database:', error);
     }
   };
 
@@ -82,19 +86,6 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({
     }
   };
 
-  const handleCapabilityToggle = (capabilityId: string) => {
-    if (!editedAgent) return;
-
-    const updatedCapabilities = editedAgent.capabilities.includes(capabilityId)
-      ? editedAgent.capabilities.filter(id => id !== capabilityId)
-      : [...editedAgent.capabilities, capabilityId];
-
-    setEditedAgent({
-      ...editedAgent,
-      capabilities: updatedCapabilities
-    });
-  };
-
   const handleMcpServerToggle = (serverId: string) => {
     if (!editedAgent) return;
 
@@ -115,7 +106,6 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({
   const tabs = [
     { id: 'general', label: 'General', icon: Settings },
     { id: 'persona', label: 'Persona', icon: User },
-    { id: 'capabilities', label: 'Capabilities', icon: Shield },
     { id: 'integrations', label: 'Integrations', icon: Database },
     { id: 'performance', label: 'Performance', icon: Activity }
   ];
@@ -229,50 +219,6 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({
                 </div>
               )}
 
-              {/* Capabilities Tab */}
-              {activeTab === 'capabilities' && (
-                <div className="space-y-6">
-                  <div>
-                    <h3 className="text-lg font-medium mb-4">Agent Capabilities</h3>
-                    <div className="grid grid-cols-1 gap-3">
-                      {AGENT_CAPABILITIES.map((capability) => (
-                        <div
-                          key={capability.id}
-                          className={`p-4 rounded-lg border-2 transition-colors cursor-pointer ${
-                            editedAgent.capabilities.includes(capability.id)
-                              ? 'border-blue-200 bg-blue-50'
-                              : 'border-gray-200 hover:border-gray-300'
-                          }`}
-                          onClick={() => handleCapabilityToggle(capability.id)}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1">
-                              <div className="flex items-center space-x-3">
-                                <div className={`p-2 rounded ${
-                                  editedAgent.capabilities.includes(capability.id)
-                                    ? 'bg-blue-100' : 'bg-gray-100'
-                                }`}>
-                                  <Shield className={`h-4 w-4 ${
-                                    editedAgent.capabilities.includes(capability.id)
-                                      ? 'text-blue-600' : 'text-gray-600'
-                                  }`} />
-                                </div>
-                                <div>
-                                  <h4 className="font-medium">{capability.name}</h4>
-                                  <p className="text-sm text-gray-600">{capability.description}</p>
-                                </div>
-                              </div>
-                            </div>
-                            {editedAgent.capabilities.includes(capability.id) && (
-                              <Check className="h-5 w-5 text-blue-600" />
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
 
               {/* Integrations Tab */}
               {activeTab === 'integrations' && (
@@ -309,26 +255,26 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({
                     <div className="space-y-3">
                       {availableMcpServers.map((server) => (
                         <div
-                          key={server.id}
+                          key={server.server_id}
                           className={`p-4 rounded-lg border-2 transition-colors cursor-pointer ${
-                            editedAgent.enabledMcpServers.includes(server.id)
+                            editedAgent.enabledMcpServers.includes(server.server_id)
                               ? 'border-green-200 bg-green-50'
                               : 'border-gray-200 hover:border-gray-300'
                           }`}
-                          onClick={() => handleMcpServerToggle(server.id)}
+                          onClick={() => handleMcpServerToggle(server.server_id)}
                         >
                           <div className="flex items-center justify-between">
                             <div>
-                              <h4 className="font-medium">{server.name}</h4>
+                              <h4 className="font-medium">{server.display_name || server.server_name}</h4>
                               <p className="text-sm text-gray-600">{server.description}</p>
                               <Badge 
-                                variant={server.isEnabled ? 'default' : 'secondary'} 
+                                variant={server.is_enabled ? 'default' : 'secondary'} 
                                 className="mt-2"
                               >
-                                {server.isEnabled ? 'Enabled' : 'Disabled'}
+                                {server.is_enabled ? 'Enabled' : 'Disabled'}
                               </Badge>
                             </div>
-                            {editedAgent.enabledMcpServers.includes(server.id) && (
+                            {editedAgent.enabledMcpServers.includes(server.server_id) && (
                               <Check className="h-5 w-5 text-green-600" />
                             )}
                           </div>

@@ -10,6 +10,7 @@ import { AnalyticsPage } from '@/features/analytics/pages/AnalyticsPage';
 import { ToolsPage } from '@/features/tools/pages/ToolsPage';
 import { ConnectionsPage } from '@/features/connections/pages/ConnectionsPage';
 import SettingsPage from '@/features/settings/pages/SettingsPage';
+import { ChatPage } from '@/features/chat/pages/ChatPage';
 import '@/styles/globals.css';
 
 /**
@@ -47,6 +48,7 @@ function App() {
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="tools" element={<ToolsPage />} />
           <Route path="connections" element={<ConnectionsPage />} />
+          <Route path="chat" element={<ChatPage />} />
           <Route path="llm-config" element={<Navigate to="/settings?tab=llm" replace />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
