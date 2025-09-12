@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '@/app/store/auth';
 import { NewLlmConfig as BackendNewLlmConfig } from '@/lib/backendLLMService';
+import SecretSelector from './SecretSelector';
 
 interface AddLlmConfigModalProps {
   isOpen: boolean;
@@ -37,6 +38,10 @@ export interface NewLlmConfig {
   model: string;
   endpoint: string;
   apiKey: string;
+  // Secret management fields
+  secretName?: string; // Name of the managed secret
+  keyVaultReference?: string; // Azure Key Vault reference string
+  useSecret?: boolean; // Whether to use a managed secret vs direct API key
   customHeaders?: Record<string, string>;
   maxTokens: number;
   temperature: number;
@@ -103,6 +108,9 @@ export default function AddLlmConfigModal({
     model: initialConfig?.model || 'gpt-4o',
     endpoint: initialConfig?.endpoint || '',
     apiKey: initialConfig?.apiKey || '',
+    secretName: initialConfig?.secretName || '',
+    keyVaultReference: initialConfig?.keyVaultReference || '',
+    useSecret: initialConfig?.useSecret || false,
     customHeaders: initialConfig?.customHeaders || {} as Record<string, string>,
     maxTokens: initialConfig?.maxTokens || 4000,
     temperature: initialConfig?.temperature || 0.7,
@@ -140,6 +148,9 @@ export default function AddLlmConfigModal({
         model: initialConfig.model || 'gpt-4o',
         endpoint: initialConfig.endpoint || '',
         apiKey: initialConfig.apiKey || '',
+        secretName: initialConfig.secretName || '',
+        keyVaultReference: initialConfig.keyVaultReference || '',
+        useSecret: initialConfig.useSecret || false,
         customHeaders: initialConfig.customHeaders || {},
         maxTokens: initialConfig.maxTokens || 4000,
         temperature: initialConfig.temperature || 0.7
@@ -156,6 +167,27 @@ export default function AddLlmConfigModal({
   const handleInputChange = (field: string, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     setTestResult(null); // Clear test result when form changes
+  };
+
+  const handleSecretSelect = (secretName: string, keyVaultReference: string) => {
+    setFormData(prev => ({
+      ...prev,
+      secretName,
+      keyVaultReference,
+      useSecret: !!secretName
+    }));
+    setTestResult(null);
+  };
+
+  const handleDirectApiKeyChange = (value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      apiKey: value,
+      useSecret: false,
+      secretName: '',
+      keyVaultReference: ''
+    }));
+    setTestResult(null);
   };
 
   const handleProviderChange = (providerId: string) => {
@@ -188,8 +220,11 @@ export default function AddLlmConfigModal({
     if (!formData.endpoint.startsWith('http://') && !formData.endpoint.startsWith('https://')) {
       return 'Endpoint must be a valid HTTP/HTTPS URL';
     }
-    if (selectedProvider?.requiresKey && !formData.apiKey.trim()) {
-      return 'API key is required for this provider';
+    if (selectedProvider?.requiresKey && !formData.useSecret && !formData.apiKey.trim()) {
+      return 'API key is required for this provider (enter directly or select a managed secret)';
+    }
+    if (selectedProvider?.requiresKey && formData.useSecret && !formData.secretName.trim()) {
+      return 'Please select a managed secret for this provider';
     }
     if (formData.maxTokens < 100 || formData.maxTokens > 32000) {
       return 'Max tokens must be between 100 and 32,000';
@@ -243,13 +278,21 @@ export default function AddLlmConfigModal({
     let headers: Record<string, string>;
     let requestBody: any;
 
+    // Get API key - either from direct input or secret
+    const apiKey = formData.useSecret ? '[SECRET_REFERENCE]' : formData.apiKey;
+    
+    // For testing with secrets, we'll need to handle the reference
+    if (formData.useSecret && formData.keyVaultReference) {
+      throw new Error('Secret-based authentication testing not implemented yet. Save configuration to test with live secret.');
+    }
+
     if (formData.provider === 'azure-openai') {
       // Test Azure OpenAI with a minimal request
       const deploymentName = formData.model;
       apiUrl = `${endpoint}/openai/deployments/${deploymentName}/chat/completions?api-version=2024-08-01-preview`;
       headers = {
         'Content-Type': 'application/json',
-        'api-key': formData.apiKey
+        'api-key': apiKey
       };
       requestBody = {
         messages: [{ role: 'user', content: 'test' }],
@@ -264,7 +307,7 @@ export default function AddLlmConfigModal({
       apiUrl = `${endpoint}/chat/completions`;
       headers = {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${formData.apiKey}`
+        'Authorization': `Bearer ${apiKey}`
       };
       requestBody = {
         model: formData.model,
@@ -278,7 +321,7 @@ export default function AddLlmConfigModal({
       apiUrl = `${endpoint}/v1/messages`;
       headers = {
         'Content-Type': 'application/json',
-        'x-api-key': formData.apiKey,
+        'x-api-key': apiKey,
         'anthropic-version': '2023-06-01'
       };
       requestBody = {
@@ -345,7 +388,10 @@ export default function AddLlmConfigModal({
         provider: formData.provider,
         model: formData.model,
         endpoint: formData.endpoint.trim(),
-        apiKey: formData.apiKey.trim(),
+        apiKey: formData.useSecret ? '' : formData.apiKey.trim(),
+        secretName: formData.useSecret ? formData.secretName : undefined,
+        keyVaultReference: formData.useSecret ? formData.keyVaultReference : undefined,
+        useSecret: formData.useSecret,
         customHeaders: Object.keys(formData.customHeaders).length > 0 ? formData.customHeaders : undefined,
         maxTokens: formData.maxTokens,
         temperature: formData.temperature,
@@ -364,6 +410,9 @@ export default function AddLlmConfigModal({
         model: 'gpt-4o',
         endpoint: '',
         apiKey: '',
+        secretName: '',
+        keyVaultReference: '',
+        useSecret: false,
         customHeaders: {},
         maxTokens: 4000,
         temperature: 0.7,
@@ -566,37 +615,17 @@ export default function AddLlmConfigModal({
               </div>
 
               {selectedProvider?.requiresKey && (
-                <div className="space-y-2">
-                  <Label htmlFor="apiKey" className="text-sm font-medium text-gray-700">
-                    API Key *
-                  </Label>
-                  <div className="relative">
-                    <Input
-                      id="apiKey"
-                      type={showApiKey ? 'text' : 'password'}
-                      value={formData.apiKey}
-                      onChange={(e) => handleInputChange('apiKey', e.target.value)}
-                      placeholder="Enter your API key..."
-                      disabled={isSaving}
-                      className="h-11 pr-12 font-mono text-sm"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="absolute right-0 top-0 h-11 px-3 hover:bg-transparent"
-                      onClick={() => setShowApiKey(!showApiKey)}
-                      disabled={isSaving}
-                    >
-                      {showApiKey ? (
-                        <EyeOff className="h-4 w-4 text-gray-400" />
-                      ) : (
-                        <Eye className="h-4 w-4 text-gray-400" />
-                      )}
-                    </Button>
-                  </div>
-                  <p className="text-xs text-gray-500">API key will be securely stored and encrypted</p>
-                </div>
+                <SecretSelector
+                  value={formData.useSecret ? formData.secretName : ''}
+                  onValueChange={handleSecretSelect}
+                  directInputValue={formData.apiKey}
+                  onDirectInputChange={handleDirectApiKeyChange}
+                  secretType="api-key"
+                  disabled={isSaving}
+                  placeholder="Select an API key secret or enter directly..."
+                  allowDirectInput={true}
+                  showCreateButton={true}
+                />
               )}
             </div>
           </div>

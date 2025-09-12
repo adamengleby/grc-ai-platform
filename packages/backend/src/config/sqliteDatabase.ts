@@ -113,7 +113,7 @@ export class SQLiteDatabase {
       this.db.exec(`
         CREATE TABLE IF NOT EXISTS users (
           user_id TEXT PRIMARY KEY,
-          azure_b2c_object_id TEXT UNIQUE NOT NULL,
+          azure_b2c_object_id TEXT UNIQUE,
           email TEXT NOT NULL,
           name TEXT NOT NULL,
           primary_tenant_id TEXT NOT NULL,
@@ -121,6 +121,10 @@ export class SQLiteDatabase {
           mfa_enabled INTEGER DEFAULT 0,
           last_login_at TEXT,
           password_last_changed TEXT,
+          saml_name_id TEXT UNIQUE,
+          saml_session_index TEXT,
+          authentication_method TEXT DEFAULT 'saml',
+          last_saml_assertion TEXT,
           created_at TEXT DEFAULT (datetime('now')),
           updated_at TEXT DEFAULT (datetime('now')),
           deleted_at TEXT NULL,
@@ -469,6 +473,171 @@ export class SQLiteDatabase {
         );
       `);
 
+      // SAML Configuration Tables for Per-Tenant Authentication
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS tenant_saml_configs (
+          config_id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL UNIQUE,
+          idp_entity_id TEXT NOT NULL,
+          idp_sso_url TEXT NOT NULL,
+          idp_slo_url TEXT,
+          idp_x509_certificate TEXT NOT NULL,
+          sp_entity_id TEXT NOT NULL,
+          sp_acs_url TEXT NOT NULL,
+          sp_sls_url TEXT,
+          sp_x509_certificate TEXT,
+          sp_private_key TEXT,
+          email_attribute TEXT DEFAULT 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress',
+          first_name_attribute TEXT DEFAULT 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname',
+          last_name_attribute TEXT DEFAULT 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname',
+          groups_attribute TEXT DEFAULT 'http://schemas.microsoft.com/ws/2008/06/identity/claims/groups',
+          user_id_attribute TEXT DEFAULT 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier',
+          name_id_format TEXT DEFAULT 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress',
+          binding_type TEXT DEFAULT 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST',
+          signature_algorithm TEXT DEFAULT 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
+          digest_algorithm TEXT DEFAULT 'http://www.w3.org/2001/04/xmlenc#sha256',
+          require_signed_assertions INTEGER DEFAULT 1,
+          require_signed_response INTEGER DEFAULT 1,
+          require_encrypted_assertions INTEGER DEFAULT 0,
+          validate_audience INTEGER DEFAULT 1,
+          session_timeout_minutes INTEGER DEFAULT 480,
+          force_reauth INTEGER DEFAULT 0,
+          is_enabled INTEGER DEFAULT 1,
+          is_tested INTEGER DEFAULT 0,
+          test_status TEXT DEFAULT 'pending',
+          test_error TEXT,
+          last_tested_at TEXT,
+          config_version INTEGER DEFAULT 1,
+          backup_config TEXT,
+          rollback_available INTEGER DEFAULT 0,
+          created_by_user_id TEXT,
+          updated_by_user_id TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now')),
+          FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id),
+          FOREIGN KEY (created_by_user_id) REFERENCES users(user_id),
+          FOREIGN KEY (updated_by_user_id) REFERENCES users(user_id)
+        );
+      `);
+
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS tenant_saml_group_mappings (
+          mapping_id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL,
+          saml_group_name TEXT NOT NULL,
+          saml_group_dn TEXT,
+          platform_role TEXT NOT NULL CHECK(platform_role IN ('TenantOwner', 'TenantAdmin', 'AgentUser', 'Auditor', 'ReadOnly')),
+          permissions TEXT DEFAULT '[]',
+          mcp_tool_groups TEXT DEFAULT '[]',
+          auto_provision_user INTEGER DEFAULT 1,
+          auto_assign_role INTEGER DEFAULT 1,
+          require_manual_approval INTEGER DEFAULT 0,
+          is_enabled INTEGER DEFAULT 1,
+          priority INTEGER DEFAULT 100,
+          created_by_user_id TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now')),
+          FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id),
+          FOREIGN KEY (created_by_user_id) REFERENCES users(user_id),
+          UNIQUE(tenant_id, saml_group_name)
+        );
+      `);
+
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS platform_admin_users (
+          admin_id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL UNIQUE,
+          admin_level TEXT NOT NULL CHECK(admin_level IN ('SuperAdmin', 'TenantManager', 'Support')),
+          can_create_tenants INTEGER DEFAULT 0,
+          can_modify_tenants INTEGER DEFAULT 0,
+          can_delete_tenants INTEGER DEFAULT 0,
+          can_view_all_tenants INTEGER DEFAULT 0,
+          can_manage_platform_configs INTEGER DEFAULT 0,
+          can_access_audit_logs INTEGER DEFAULT 0,
+          restricted_to_regions TEXT DEFAULT '[]',
+          max_tenants_managed INTEGER DEFAULT NULL,
+          is_enabled INTEGER DEFAULT 1,
+          requires_mfa INTEGER DEFAULT 1,
+          granted_by_admin_id TEXT,
+          granted_at TEXT DEFAULT (datetime('now')),
+          last_login_at TEXT,
+          FOREIGN KEY (user_id) REFERENCES users(user_id),
+          FOREIGN KEY (granted_by_admin_id) REFERENCES platform_admin_users(admin_id)
+        );
+      `);
+
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS tenant_onboarding_requests (
+          request_id TEXT PRIMARY KEY,
+          organization_name TEXT NOT NULL,
+          organization_domain TEXT NOT NULL,
+          primary_contact_email TEXT NOT NULL,
+          primary_contact_name TEXT NOT NULL,
+          primary_contact_phone TEXT,
+          requested_subscription_tier TEXT NOT NULL DEFAULT 'starter',
+          estimated_users INTEGER,
+          requested_region TEXT DEFAULT 'eastus',
+          has_existing_sso INTEGER DEFAULT 0,
+          sso_provider TEXT,
+          technical_contact_email TEXT,
+          technical_contact_name TEXT,
+          compliance_frameworks TEXT DEFAULT '[]',
+          use_cases TEXT,
+          integration_requirements TEXT,
+          status TEXT NOT NULL DEFAULT 'submitted' CHECK(status IN (
+            'submitted', 'reviewing', 'approved', 'provisioning', 
+            'configuring', 'testing', 'completed', 'rejected', 'cancelled'
+          )),
+          rejection_reason TEXT,
+          assigned_tenant_id TEXT,
+          assigned_admin_id TEXT,
+          provisioned_at TEXT,
+          completed_at TEXT,
+          review_notes TEXT,
+          reviewed_by_admin_id TEXT,
+          reviewed_at TEXT,
+          approved_by_admin_id TEXT,
+          approved_at TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now')),
+          FOREIGN KEY (assigned_admin_id) REFERENCES platform_admin_users(admin_id),
+          FOREIGN KEY (reviewed_by_admin_id) REFERENCES platform_admin_users(admin_id),
+          FOREIGN KEY (approved_by_admin_id) REFERENCES platform_admin_users(admin_id),
+          FOREIGN KEY (assigned_tenant_id) REFERENCES tenants(tenant_id)
+        );
+      `);
+
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS tenant_provisioning_status (
+          status_id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL UNIQUE,
+          onboarding_request_id TEXT,
+          infrastructure_provisioned INTEGER DEFAULT 0,
+          database_initialized INTEGER DEFAULT 0,
+          saml_configured INTEGER DEFAULT 0,
+          admin_user_created INTEGER DEFAULT 0,
+          default_configurations_applied INTEGER DEFAULT 0,
+          mcp_servers_configured INTEGER DEFAULT 0,
+          testing_completed INTEGER DEFAULT 0,
+          current_step TEXT DEFAULT 'pending',
+          current_step_status TEXT DEFAULT 'not_started',
+          current_step_details TEXT,
+          error_details TEXT,
+          total_steps INTEGER DEFAULT 7,
+          completed_steps INTEGER DEFAULT 0,
+          estimated_completion_time TEXT,
+          automated_provisioning INTEGER DEFAULT 1,
+          requires_manual_intervention INTEGER DEFAULT 0,
+          manual_intervention_reason TEXT,
+          started_at TEXT DEFAULT (datetime('now')),
+          completed_at TEXT,
+          failed_at TEXT,
+          last_updated_at TEXT DEFAULT (datetime('now')),
+          FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id),
+          FOREIGN KEY (onboarding_request_id) REFERENCES tenant_onboarding_requests(request_id)
+        );
+      `);
+
       // Privacy Settings Table - Critical for LLM data protection
       this.db.exec(`
         CREATE TABLE IF NOT EXISTS privacy_settings (
@@ -484,6 +653,23 @@ export class SQLiteDatabase {
           created_at TEXT DEFAULT (datetime('now')),
           updated_at TEXT DEFAULT (datetime('now')),
           UNIQUE(tenant_id, user_id)
+        );
+      `);
+
+      // Tenant Secrets Table - Azure Key Vault references for secure secret management
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS tenant_secrets (
+          id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+          tenant_id TEXT NOT NULL,
+          secret_name TEXT NOT NULL,
+          secret_type TEXT NOT NULL CHECK (secret_type IN ('api-key', 'connection-string', 'certificate', 'custom')),
+          description TEXT,
+          key_vault_reference TEXT NOT NULL,
+          is_active INTEGER DEFAULT 1,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now')),
+          UNIQUE(tenant_id, secret_name),
+          FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE
         );
       `);
 
@@ -543,8 +729,8 @@ export class SQLiteDatabase {
 
       // Insert sample user
       this.execute(`
-        INSERT INTO users (user_id, azure_b2c_object_id, email, name, primary_tenant_id, status, mfa_enabled)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (user_id, azure_b2c_object_id, email, name, primary_tenant_id, status, mfa_enabled, saml_name_id, authentication_method)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         userId,
         'demo-user-object-id-123',
@@ -552,7 +738,9 @@ export class SQLiteDatabase {
         'Demo User',
         tenantId,
         'active',
-        0
+        0,
+        'demo@example.com',
+        'saml'
       ]);
 
       // Insert user role
@@ -825,6 +1013,54 @@ export class SQLiteDatabase {
           mapping.roleName,
           mapping.groupId,
           userId
+        ]);
+      });
+
+      // Insert sample platform admin
+      this.execute(`
+        INSERT OR IGNORE INTO platform_admin_users (
+          admin_id, user_id, admin_level, can_create_tenants, can_modify_tenants, 
+          can_delete_tenants, can_view_all_tenants, can_manage_platform_configs, 
+          can_access_audit_logs, is_enabled, requires_mfa
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        'ADMIN-001-SUPER', userId, 'SuperAdmin',
+        1, 1, 1, 1, 1, 1, 1, 1
+      ]);
+
+      // Insert sample SAML configuration for demo tenant
+      this.execute(`
+        INSERT OR IGNORE INTO tenant_saml_configs (
+          config_id, tenant_id, idp_entity_id, idp_sso_url, idp_x509_certificate,
+          sp_entity_id, sp_acs_url, is_enabled, is_tested, test_status, created_by_user_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        'SAML-001-DEMO', tenantId,
+        'https://demo-corp.okta.com/exk1234567890',
+        'https://demo-corp.okta.com/app/demo-grc-platform/exk1234567890/sso/saml',
+        '-----BEGIN CERTIFICATE-----\\nMIIC... (demo certificate)\\n-----END CERTIFICATE-----',
+        'https://grc-platform.example.com/saml/metadata',
+        'https://grc-platform.example.com/saml/acs',
+        1, 0, 'configured', userId
+      ]);
+
+      // Insert sample SAML group mappings
+      const samlMappings = [
+        { mappingId: 'MAPPING-001', groupName: 'GRC_Administrators', role: 'TenantOwner', toolGroups: [toolGroupIds.grcAdmins], priority: 10 },
+        { mappingId: 'MAPPING-002', groupName: 'Risk_Analysts', role: 'AgentUser', toolGroups: [toolGroupIds.riskAnalysts], priority: 20 },
+        { mappingId: 'MAPPING-003', groupName: 'Compliance_Officers', role: 'AgentUser', toolGroups: [toolGroupIds.complianceUsers], priority: 20 },
+        { mappingId: 'MAPPING-004', groupName: 'Auditors', role: 'Auditor', toolGroups: [toolGroupIds.complianceUsers], priority: 30 }
+      ];
+
+      samlMappings.forEach(mapping => {
+        this.execute(`
+          INSERT OR IGNORE INTO tenant_saml_group_mappings (
+            mapping_id, tenant_id, saml_group_name, platform_role, 
+            mcp_tool_groups, is_enabled, priority, created_by_user_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          mapping.mappingId, tenantId, mapping.groupName, mapping.role, 
+          JSON.stringify(mapping.toolGroups), 1, mapping.priority, userId
         ]);
       });
 

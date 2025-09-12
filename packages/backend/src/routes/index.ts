@@ -1,5 +1,5 @@
 import { Router } from 'express';
-// import analyticsRouter from './analytics'; // DISABLED for troubleshooting
+import analyticsRouter from './analytics';
 import authRouter from './auth';
 import { credentialsRouter } from './credentials';
 import mcpRouter from './mcp';
@@ -10,6 +10,11 @@ import simpleAgentsRouter from './simpleAgents';
 import simpleCredentialsRouter from './simpleCredentials';
 import simpleLLMConfigsRouter from './simpleLLMConfigs';
 import simpleMCPConfigsRouter from './simpleMCPConfigs';
+// Temporarily disabled due to winston Console error
+// import tenantManagementRouter from './tenantManagement';
+// import samlAuthRouter from './samlAuth';
+// Re-enabled with mock Azure Key Vault for local development
+import tenantSecretsRouter from './tenantSecrets';
 
 /**
  * Main API Routes
@@ -17,8 +22,8 @@ import simpleMCPConfigsRouter from './simpleMCPConfigs';
  */
 export const apiRouter = Router();
 
-// Mount analytics routes - DISABLED for troubleshooting
-// apiRouter.use('/analytics', analyticsRouter);
+// Mount analytics routes
+apiRouter.use('/analytics', analyticsRouter);
 
 // Mount auth routes
 apiRouter.use('/auth', authRouter);
@@ -93,6 +98,16 @@ apiRouter.use('/simple-agents', simpleAgentsRouter);
 apiRouter.use('/simple-credentials', simpleCredentialsRouter);
 apiRouter.use('/simple-llm-configs', simpleLLMConfigsRouter);
 apiRouter.use('/simple-mcp-configs', simpleMCPConfigsRouter);
+
+// Temporarily disabled routes due to dependency issues
+// Mount tenant management routes
+// apiRouter.use('/tenant-management', tenantManagementRouter);
+
+// Mount SAML authentication routes  
+// apiRouter.use('/auth/saml', samlAuthRouter);
+
+// Mount tenant secrets routes
+apiRouter.use('/tenant-secrets', tenantSecretsRouter);
 
 // Health check for the entire API
 apiRouter.get('/health', (req, res) => {

@@ -19,7 +19,7 @@ interface AuthState {
   error: string | null;
 
   // Actions
-  login: (email: string) => Promise<void>;
+  login: (email: string, password?: string) => Promise<void>;
   logout: () => Promise<void>;
   switchTenant: (tenantId: string) => Promise<void>;
   refreshAuth: () => Promise<void>;
@@ -38,12 +38,12 @@ export const useAuthStore = create<AuthState>()(
     availableTenants: [],
     error: null,
 
-    login: async (email: string) => {
-      console.log('Auth store: Starting login process for', email);
+    login: async (email: string, password?: string) => {
+      console.log('Auth store: Starting login process for', email, password ? '(with password)' : '(demo mode)');
       set({ isLoading: true, error: null });
       
       try {
-        const { token, user, tenant } = await authService.login(email);
+        const { token, user, tenant } = await authService.login(email, password);
         const availableTenants = await authService.getAvailableTenants();
         
         console.log('Auth store: Login successful', { user: user.name, tenant: tenant.name });

@@ -11,6 +11,7 @@ import { ToolsPage } from '@/features/tools/pages/ToolsPage';
 import { ConnectionsPage } from '@/features/connections/pages/ConnectionsPage';
 import SettingsPage from '@/features/settings/pages/SettingsPage';
 import { ChatPage } from '@/features/chat/pages/ChatPage';
+import { PlatformAdminPage } from '@/features/platform-admin/pages/PlatformAdminPage';
 import '@/styles/globals.css';
 
 /**
@@ -51,6 +52,7 @@ function App() {
           <Route path="chat" element={<ChatPage />} />
           <Route path="llm-config" element={<Navigate to="/settings?tab=llm" replace />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="platform-admin" element={<PlatformAdminPage />} />
         </Route>
         
         {/* Catch all route */}

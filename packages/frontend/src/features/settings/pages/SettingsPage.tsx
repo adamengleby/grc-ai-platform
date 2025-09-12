@@ -13,7 +13,8 @@ import {
   AlertTriangle,
   CheckCircle,
   Clock,
-  Database
+  Database,
+  Lock
 } from 'lucide-react';
 
 // Components for each tab
@@ -210,7 +211,7 @@ export default function SettingsPage() {
         setActiveTab(tab);
         setSearchParams(tab === 'llm' ? {} : { tab });
       }} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="llm" className="flex items-center space-x-2">
             <Brain className="h-4 w-4" />
             <span className="hidden sm:inline">LLM Models</span>
@@ -220,6 +221,11 @@ export default function SettingsPage() {
             <Server className="h-4 w-4" />
             <span className="hidden sm:inline">MCP Servers</span>
             <span className="sm:hidden">MCP</span>
+          </TabsTrigger>
+          <TabsTrigger value="sso" className="flex items-center space-x-2">
+            <Lock className="h-4 w-4" />
+            <span className="hidden sm:inline">SSO / SAML</span>
+            <span className="sm:hidden">SSO</span>
           </TabsTrigger>
           <TabsTrigger value="privacy" className="flex items-center space-x-2">
             <Shield className="h-4 w-4" />
@@ -260,6 +266,187 @@ export default function SettingsPage() {
           )}
         </TabsContent>
 
+        {/* SSO / SAML Tab */}
+        <TabsContent value="sso" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center space-x-2">
+                <Lock className="h-5 w-5 text-blue-600" />
+                <CardTitle>Single Sign-On Configuration</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-6">
+                {/* SSO Status */}
+                <div className="p-4 border rounded-lg">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="font-medium text-gray-900">SAML Authentication</h3>
+                      <p className="text-sm text-gray-500">Configure SAML 2.0 single sign-on for your tenant</p>
+                    </div>
+                    <Badge variant="secondary">Not Configured</Badge>
+                  </div>
+                  
+                  {!canModifySettings && (
+                    <Alert className="mb-4">
+                      <AlertTriangle className="h-4 w-4" />
+                      Contact your tenant owner to configure SSO settings.
+                    </Alert>
+                  )}
+
+                  {/* SSO Configuration Form */}
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Identity Provider Entity ID
+                        </label>
+                        <input
+                          type="text"
+                          disabled={!canModifySettings}
+                          className="w-full p-2 border border-gray-300 rounded-md disabled:bg-gray-50"
+                          placeholder="https://identity.company.com/saml"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          SSO Login URL
+                        </label>
+                        <input
+                          type="url"
+                          disabled={!canModifySettings}
+                          className="w-full p-2 border border-gray-300 rounded-md disabled:bg-gray-50"
+                          placeholder="https://identity.company.com/sso/login"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        X.509 Certificate
+                      </label>
+                      <textarea
+                        rows={4}
+                        disabled={!canModifySettings}
+                        className="w-full p-2 border border-gray-300 rounded-md font-mono text-xs disabled:bg-gray-50"
+                        placeholder="-----BEGIN CERTIFICATE-----&#10;Your X.509 certificate content&#10;-----END CERTIFICATE-----"
+                      />
+                    </div>
+
+                    {/* Attribute Mapping */}
+                    <div className="border-t pt-4">
+                      <h4 className="font-medium text-gray-900 mb-3">Attribute Mapping</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Email Attribute
+                          </label>
+                          <input
+                            type="text"
+                            disabled={!canModifySettings}
+                            defaultValue="http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"
+                            className="w-full p-2 border border-gray-300 rounded-md text-xs disabled:bg-gray-50"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Display Name Attribute
+                          </label>
+                          <input
+                            type="text"
+                            disabled={!canModifySettings}
+                            defaultValue="http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"
+                            className="w-full p-2 border border-gray-300 rounded-md text-xs disabled:bg-gray-50"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Security Settings */}
+                    <div className="border-t pt-4">
+                      <h4 className="font-medium text-gray-900 mb-3">Security Settings</h4>
+                      <div className="space-y-2">
+                        <label className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            disabled={!canModifySettings}
+                            defaultChecked
+                            className="rounded"
+                          />
+                          <span className="text-sm">Require signed assertions</span>
+                        </label>
+                        <label className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            disabled={!canModifySettings}
+                            className="rounded"
+                          />
+                          <span className="text-sm">Require signed response</span>
+                        </label>
+                        <label className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            disabled={!canModifySettings}
+                            defaultChecked
+                            className="rounded"
+                          />
+                          <span className="text-sm">Enable automatic user provisioning</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  {canModifySettings && (
+                    <div className="flex items-center justify-between pt-6 border-t">
+                      <button className="flex items-center space-x-2 px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">
+                        <span>Test SSO Configuration</span>
+                      </button>
+                      <div className="flex items-center space-x-2">
+                        <button className="px-4 py-2 text-gray-600 hover:text-gray-800">
+                          Reset
+                        </button>
+                        <button className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                          Save SSO Settings
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* SSO Information */}
+                <Card className="border-blue-100 bg-blue-50">
+                  <CardContent className="pt-4">
+                    <div className="flex items-start space-x-3">
+                      <Shield className="h-5 w-5 text-blue-600 mt-0.5" />
+                      <div>
+                        <h4 className="font-medium text-blue-900 mb-1">Service Provider Information</h4>
+                        <p className="text-sm text-blue-700 mb-3">
+                          Provide these details to your identity provider administrator:
+                        </p>
+                        <div className="space-y-2 text-xs">
+                          <div>
+                            <span className="font-medium">ACS URL:</span>
+                            <code className="ml-2 px-2 py-1 bg-blue-100 rounded">
+                              {window.location.origin}/api/v1/auth/saml/{tenant?.slug || 'your-tenant'}/callback
+                            </code>
+                          </div>
+                          <div>
+                            <span className="font-medium">Entity ID:</span>
+                            <code className="ml-2 px-2 py-1 bg-blue-100 rounded">
+                              urn:{tenant?.slug || 'your-tenant'}:saml:sp
+                            </code>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         {/* Privacy Protection Tab */}
         <TabsContent value="privacy" className="space-y-6">
           {tenant && (
@@ -271,6 +458,7 @@ export default function SettingsPage() {
             />
           )}
         </TabsContent>
+
 
         {/* Advanced Settings Tab */}
         <TabsContent value="advanced" className="space-y-6">
