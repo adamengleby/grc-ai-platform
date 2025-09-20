@@ -1,0 +1,202 @@
+name: Deploy to Azure Production
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+env:
+  AZURE_FUNCTIONAPP_NAME: func-grc-backend-prod
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: './packages/backend'
+  NODE_VERSION: '18.x'
+  CONTAINER_REGISTRY: acrgrcplatformprod.azurecr.io
+  MCP_IMAGE_NAME: grc-mcp-server
+
+jobs:
+  # Infrastructure Deployment
+  infrastructure:
+    runs-on: ubuntu-latest
+    outputs:
+      function-app-name: ${{ steps.terraform.outputs.function_app_name }}
+      static-web-app-url: ${{ steps.terraform.outputs.static_web_app_url }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.6.0
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Terraform Init
+      run: |
+        cd infrastructure
+        terraform init
+
+    - name: Terraform Plan
+      run: |
+        cd infrastructure
+        terraform plan -var-file="terraform.tfvars"
+
+    - name: Terraform Apply
+      if: github.ref == 'refs/heads/master'
+      id: terraform
+      run: |
+        cd infrastructure
+        terraform apply -auto-approve -var-file="terraform.tfvars"
+        echo "function_app_name=$(terraform output -raw function_app_name)" >> $GITHUB_OUTPUT
+        echo "static_web_app_url=$(terraform output -raw static_web_app_url)" >> $GITHUB_OUTPUT
+
+  # Build and Deploy Backend Function App
+  deploy-backend:
+    needs: infrastructure
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        cd packages/backend
+        npm ci
+
+    - name: Build backend
+      run: |
+        cd packages/backend
+        npm run build
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Deploy to Azure Functions
+      uses: Azure/functions-action@v1
+      with:
+        app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
+        package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+
+  # Build and Deploy MCP Server Container
+  deploy-mcp-server:
+    needs: infrastructure
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Login to Azure Container Registry
+      uses: azure/docker-login@v1
+      with:
+        login-server: ${{ env.CONTAINER_REGISTRY }}
+        username: ${{ secrets.ACR_USERNAME }}
+        password: ${{ secrets.ACR_PASSWORD }}
+
+    - name: Build MCP Server Docker image
+      run: |
+        cd packages/mcp-server
+        docker build -t ${{ env.CONTAINER_REGISTRY }}/${{ env.MCP_IMAGE_NAME }}:${{ github.sha }} .
+        docker build -t ${{ env.CONTAINER_REGISTRY }}/${{ env.MCP_IMAGE_NAME }}:latest .
+
+    - name: Push Docker image
+      run: |
+        docker push ${{ env.CONTAINER_REGISTRY }}/${{ env.MCP_IMAGE_NAME }}:${{ github.sha }}
+        docker push ${{ env.CONTAINER_REGISTRY }}/${{ env.MCP_IMAGE_NAME }}:latest
+
+    - name: Deploy to Azure Container Instances
+      uses: azure/aci-deploy@v1
+      with:
+        resource-group: rg-grc-ai-platform-prod
+        dns-name-label: grc-mcp-server-prod
+        image: ${{ env.CONTAINER_REGISTRY }}/${{ env.MCP_IMAGE_NAME }}:${{ github.sha }}
+        registry-login-server: ${{ env.CONTAINER_REGISTRY }}
+        registry-username: ${{ secrets.ACR_USERNAME }}
+        registry-password: ${{ secrets.ACR_PASSWORD }}
+        name: aci-grc-mcp-server-prod
+        ports: 3006
+        cpu: 1
+        memory: 2
+        environment-variables: |
+          NODE_ENV=production
+          PORT=3006
+          LOG_LEVEL=info
+
+  # Build and Deploy Frontend
+  deploy-frontend:
+    needs: infrastructure
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Install frontend dependencies
+      run: |
+        cd packages/frontend
+        npm ci
+
+    - name: Build frontend
+      run: |
+        cd packages/frontend
+        npm run build
+      env:
+        VITE_API_BASE_URL: https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/v1
+        VITE_MCP_SERVER_URL: https://grc-mcp-server-prod.eastus.azurecontainer.io:3006
+
+    - name: Deploy to Azure Static Web Apps
+      uses: Azure/static-web-apps-deploy@v1
+      with:
+        azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        action: "upload"
+        app_location: "/packages/frontend"
+        output_location: "dist"
+
+  # Post-deployment validation
+  validate-deployment:
+    needs: [deploy-backend, deploy-mcp-server, deploy-frontend]
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Validate Backend Health
+      run: |
+        curl -f https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/v1/health
+
+    - name: Validate MCP Server Health
+      run: |
+        curl -f https://grc-mcp-server-prod.eastus.azurecontainer.io:3006/health
+
+    - name: Validate OAuth Configuration
+      run: |
+        curl -f https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/v1/oauth/health
+
+    - name: Validate Frontend Deployment
+      run: |
+        curl -f ${{ needs.infrastructure.outputs.static-web-app-url }}
+
+    - name: Run Integration Tests
+      run: |
+        echo "Integration tests would run here"
+        # Add actual integration test commands
