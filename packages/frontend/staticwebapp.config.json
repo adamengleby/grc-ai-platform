@@ -33,7 +33,7 @@
     },
     {
       "route": "/api/*",
-      "allowedRoles": ["authenticated"]
+      "allowedRoles": ["anonymous", "authenticated"]
     },
     {
       "route": "/admin/*",
@@ -44,19 +44,11 @@
       "allowedRoles": ["anonymous", "authenticated"]
     }
   ],
-  "responseOverrides": {
-    "401": {
-      "redirect": "/.auth/login/aad",
-      "statusCode": 302
-    }
-  },
+  "responseOverrides": {},
   "mimeTypes": {
     ".json": "text/json"
   },
   "platform": {
     "apiRuntime": "node:18"
-  },
-  "environmentVariables": {
-    "VITE_API_BASE_URL": "https://func-grc-backend-prod.azurewebsites.net/api/v1"
   }
 }
