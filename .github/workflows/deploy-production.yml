@@ -158,6 +158,18 @@ jobs:
       with:
         node-version: ${{ env.NODE_VERSION }}
 
+    - name: Install root dependencies
+      run: |
+        npm install
+
+    - name: Build frontend with environment variables
+      run: |
+        cd packages/frontend
+        npm run build
+      env:
+        VITE_API_BASE_URL: https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/v1
+        VITE_MCP_SERVER_URL: https://grc-mcp-server-prod.eastus.azurecontainer.io:3006
+
     - name: Deploy to Azure Static Web Apps
       uses: Azure/static-web-apps-deploy@v1
       with:
@@ -166,11 +178,7 @@ jobs:
         action: "upload"
         app_location: "/packages/frontend"
         output_location: "dist"
-        app_build_command: "cd .. && npm install && cd packages/frontend && rm -rf node_modules && npm install && npm run build"
-        skip_app_build: false
-      env:
-        VITE_API_BASE_URL: https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/v1
-        VITE_MCP_SERVER_URL: https://grc-mcp-server-prod.eastus.azurecontainer.io:3006
+        skip_app_build: true
 
   # Post-deployment validation
   validate-deployment:
