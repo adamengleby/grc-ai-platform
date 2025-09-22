@@ -67,7 +67,7 @@ jobs:
 
     - name: Install monorepo dependencies
       run: |
-        npm ci
+        npm install
 
     - name: Build backend
       run: |
@@ -113,7 +113,7 @@ jobs:
 
     - name: Install monorepo dependencies
       run: |
-        npm ci
+        npm install
 
     - name: Build MCP Server Docker image
       run: |
@@ -160,7 +160,7 @@ jobs:
 
     - name: Install monorepo dependencies
       run: |
-        npm ci
+        npm install
 
     - name: Build frontend
       run: |
