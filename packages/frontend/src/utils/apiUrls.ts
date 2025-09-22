@@ -22,16 +22,23 @@ export const getBackendApiUrl = (): string => {
     'import.meta.env': import.meta.env
   });
 
+  // Force external API calls for Azure Static Web Apps to avoid built-in routing
+  const isAzureStaticWebApps = hostname?.includes('azurestaticapps.net');
+
+  if (isAzureStaticWebApps) {
+    // ALWAYS use external Azure Functions when on Azure Static Web Apps
+    const externalUrl = baseUrl || 'https://func-grc-backend-prod.azurewebsites.net/api/v1';
+    console.log('📍 Azure Static Web Apps detected - using external API:', externalUrl);
+    return externalUrl;
+  }
+
   // Always use the build-time configured API URL if available
   if (baseUrl) {
     console.log('📍 Using configured API URL from VITE_API_BASE_URL:', baseUrl);
     return baseUrl;
   }
 
-  // Force production mode for Azure Static Web Apps domains
-  const isAzureStaticWebApps = hostname?.includes('azurestaticapps.net');
-
-  if (isDev && !isAzureStaticWebApps) {
+  if (isDev) {
     console.log('📍 Using development API URL');
     return 'http://localhost:3005/api/v1';
   }
