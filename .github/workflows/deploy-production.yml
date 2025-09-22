@@ -13,107 +13,47 @@ env:
   MCP_IMAGE_NAME: grc-mcp-server
 
 jobs:
-  # Infrastructure Deployment
-  infrastructure:
+  # Validate Azure Resources (skip infrastructure provisioning)
+  validate-azure:
     runs-on: ubuntu-latest
     outputs:
-      function-app-name: ${{ steps.terraform.outputs.function_app_name }}
-      static-web-app-url: ${{ steps.terraform.outputs.static_web_app_url }}
+      function-app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
+      static-web-app-url: "https://grc-ai-platform-prod.azurestaticapps.net"
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: 1.6.0
 
     - name: Azure Login
       uses: azure/login@v1
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    - name: Debug repository structure
+    - name: Validate Azure Resources
       run: |
-        echo "Repository root contents:"
-        ls -la
-        echo "Looking for infrastructure directory:"
-        find . -name "infrastructure" -type d
-        echo "Checking parent directory:"
-        ls -la ../ | grep infrastructure || echo "Not found in parent directory"
+        echo "Validating existing Azure resources..."
 
-    - name: Create Terraform Variables
-      run: |
-        cd ../infrastructure/terraform
-        cat > terraform.tfvars << 'EOF'
-        project_name = "grc-ai-platform"
-        environment  = "production"
-        location     = "East US"
+        # Check if Function App exists
+        if az functionapp show --name ${{ env.AZURE_FUNCTIONAPP_NAME }} --resource-group rg-grc-ai-platform-prod > /dev/null 2>&1; then
+          echo "✅ Function App ${{ env.AZURE_FUNCTIONAPP_NAME }} exists"
+        else
+          echo "❌ Function App ${{ env.AZURE_FUNCTIONAPP_NAME }} not found"
+          exit 1
+        fi
 
-        vnet_address_space = ["10.0.0.0/16"]
+        # Check if Container Registry exists
+        if az acr show --name acrgrcplatformprod > /dev/null 2>&1; then
+          echo "✅ Container Registry acrgrcplatformprod exists"
+        else
+          echo "❌ Container Registry acrgrcplatformprod not found"
+          exit 1
+        fi
 
-        allowed_ip_ranges = [
-          "0.0.0.0/0"
-        ]
-
-        allowed_cors_origins = [
-          "https://*.azurestaticapps.net",
-          "https://localhost:3000"
-        ]
-
-        container_registry_url = "acrgrcplatformprod.azurecr.io"
-        mcp_server_image_tag   = "latest"
-
-        apim_publisher_email = "admin@grcplatform.com"
-        apim_publisher_name  = "GRC Platform Team"
-
-        alert_email_receivers = [
-          {
-            name  = "Platform Team"
-            email = "alerts@grcplatform.com"
-          }
-        ]
-
-        common_tags = {
-          Project        = "GRC-AI-Platform"
-          Environment    = "Production"
-          ManagedBy      = "Terraform"
-          CostCenter     = "Platform"
-        }
-
-        tenant_configurations = {}
-
-        enable_autoscaling = true
-        enable_private_endpoints = true
-        enable_firewall = true
-        enable_ddos_protection = true
-        geo_redundant_backup = true
-        enable_diagnostic_settings = true
-        EOF
-
-    - name: Terraform Init
-      run: |
-        cd ../infrastructure/terraform
-        terraform init
-
-    - name: Terraform Plan
-      run: |
-        cd ../infrastructure/terraform
-        terraform plan -var-file="terraform.tfvars"
-
-    - name: Terraform Apply
-      if: github.ref == 'refs/heads/master'
-      id: terraform
-      run: |
-        cd ../infrastructure/terraform
-        terraform apply -auto-approve -var-file="terraform.tfvars"
-        echo "function_app_name=$(terraform output -raw function_app_name)" >> $GITHUB_OUTPUT
-        echo "static_web_app_url=$(terraform output -raw static_web_app_url)" >> $GITHUB_OUTPUT
+        echo "✅ All required Azure resources are available"
 
   # Build and Deploy Backend Function App
   deploy-backend:
-    needs: infrastructure
+    needs: validate-azure
     runs-on: ubuntu-latest
 
     steps:
@@ -148,7 +88,7 @@ jobs:
 
   # Build and Deploy MCP Server Container
   deploy-mcp-server:
-    needs: infrastructure
+    needs: validate-azure
     runs-on: ubuntu-latest
 
     steps:
@@ -198,7 +138,7 @@ jobs:
 
   # Build and Deploy Frontend
   deploy-frontend:
-    needs: infrastructure
+    needs: validate-azure
     runs-on: ubuntu-latest
 
     steps:
@@ -252,7 +192,7 @@ jobs:
 
     - name: Validate Frontend Deployment
       run: |
-        curl -f ${{ needs.infrastructure.outputs.static-web-app-url }}
+        curl -f ${{ needs.validate-azure.outputs.static-web-app-url }}
 
     - name: Run Integration Tests
       run: |
