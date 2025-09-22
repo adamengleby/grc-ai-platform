@@ -4,12 +4,9 @@
  */
 
 import { AnalyticsService } from './analyticsService';
-import { 
-  RealTimeMetrics, 
-  RiskAnalytics, 
-  ComplianceAnalytics, 
-  ControlAnalytics,
-  PredictiveInsights,
+import {
+  RealTimeMetrics,
+  RiskAnalytics,
   EventStream,
   AnalyticsTimeRange,
   MLModel

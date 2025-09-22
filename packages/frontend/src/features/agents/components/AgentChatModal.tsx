@@ -105,16 +105,12 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
   });
   const [conversationHistory, setConversationHistory] = useState<LLMMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [isInitialized, setIsInitialized] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
 
   // MCP SSE Integration for real-time tool progress
   const {
     isConnected: mcpConnected,
-    connectionError: mcpConnectionError,
-    activeCalls: activeMCPTools,
-    callTool: callMCPTool,
-    sessionInfo: mcpSessionInfo
+    activeCalls: activeMCPTools
   } = useMCPSSE();
 
   // Refs
@@ -188,7 +184,7 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
         console.log(`[AgentChatModal] 🛠️  Agent ${agent.id} MCP servers:`, agentContext.mcpServers?.length || 0);
         if (agentContext.mcpServers && agentContext.mcpServers.length > 0) {
           console.log('[AgentChatModal] ✅ Configured MCP servers:', 
-            agentContext.mcpServers.map(s => ({ id: s.id, name: s.name })));
+            agentContext.mcpServers.map((s: any) => ({ id: s.id, name: s.name })));
         } else {
           console.warn(`[AgentChatModal] ⚠️  No MCP servers configured for agent ${agent.id}`);
         }
@@ -212,7 +208,7 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
           const welcomeMessage: ChatMessage = {
             id: 'welcome-' + Date.now(),
             type: 'agent',
-            content: `Hello! I'm ${agent.name}. ${agent.description}\n\nI have access to the following tools:\n${agentContext.mcpServers?.map(s => `• ${s.name}`).join('\n') || '• No MCP servers configured'}\n\nWhat would you like to analyze today?`,
+            content: `Hello! I'm ${agent.name}. ${agent.description}\n\nI have access to the following tools:\n${agentContext.mcpServers?.map((s: any) => `• ${s.name}`).join('\n') || '• No MCP servers configured'}\n\nWhat would you like to analyze today?`,
             timestamp: new Date()
           };
           setMessages([welcomeMessage]);
@@ -233,7 +229,6 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
         }
         
         console.log(`[AgentChatModal] ✅ CHAT INITIALIZATION COMPLETE`);
-        setIsInitialized(true);
         initializedAgentRef.current = agent.id;
         setError(null);
         
@@ -290,7 +285,6 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
   // Reset state when modal closes
   useEffect(() => {
     if (!isOpen) {
-      setIsInitialized(false);
       initializedAgentRef.current = null;
       setError(null);
       setIsLoading(false);
@@ -464,7 +458,7 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
     const welcomeMessage: ChatMessage = {
       id: 'welcome-' + Date.now(),
       type: 'agent',
-      content: `Hello! I'm ${agent.name}. ${agent.description}\n\nI have access to the following tools:\n${connectionStatus.agentContext?.mcpServers?.map(s => `• ${s.name}`).join('\n') || '• No MCP servers configured'}\n\nWhat would you like to analyze today?`,
+      content: `Hello! I'm ${agent.name}. ${agent.description}\n\nI have access to the following tools:\n${connectionStatus.agentContext?.mcpServers?.map((s: any) => `• ${s.name}`).join('\n') || '• No MCP servers configured'}\n\nWhat would you like to analyze today?`,
       timestamp: new Date()
     };
     
@@ -512,10 +506,9 @@ export const AgentChatModal: React.FC<AgentChatModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <Dialog 
-      open={isOpen} 
+    <Dialog
+      open={isOpen}
       onOpenChange={onClose}
-      modal={true}
     >
       <div className={clsx(
         'fixed inset-0 z-50 flex items-center justify-center p-4',

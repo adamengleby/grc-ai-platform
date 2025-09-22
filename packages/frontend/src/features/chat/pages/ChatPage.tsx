@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { EnhancedMarkdown } from '../../../components/ui/EnhancedMarkdown';
-import { Send, Download, User, Bot, AlertTriangle, CheckCircle, Clock, RefreshCw, ChevronDown, Shield, ArrowLeft, Trash2, Copy, ThumbsUp, ThumbsDown, MoreVertical } from 'lucide-react';
+import { User, Bot, AlertTriangle, RefreshCw, ChevronDown, Shield, ArrowLeft, Trash2, Copy, ThumbsUp, ThumbsDown, MoreVertical } from 'lucide-react';
 import { Button } from '@/app/components/ui/Button';
-import { Input } from '@/app/components/ui/Input';
 import { Badge } from '@/app/components/ui/Badge';
 import { Alert } from '@/app/components/ui/Alert';
 import { AIAgent } from '@/types/agent';
@@ -12,7 +11,6 @@ import { createLLMService, LLMResponse, LLMMessage } from '@/lib/llmService';
 import { useAuthStore } from '@/app/store/auth';
 import { credentialsManager, type ArcherCredentials } from '@/lib/backendCredentialsApi';
 // import { createTestMcpServerConfig, verifyTenantMcpConfig } from '@/lib/testMcpConfig';
-import { runMCPIntegrationTests } from '@/lib/testMcpIntegration';
 // import { fixMcpEndpointConfiguration } from '../../../lib/fixMcpEndpoint';
 import { clsx } from 'clsx';
 import { ArcherAuthModal, ArcherSessionData } from '../components/ArcherAuthModal';
@@ -620,28 +618,6 @@ export const ChatPage: React.FC = () => {
     };
   }, [clearAllChatSessions, tenant?.id]);
 
-  // Handle export conversation
-  const handleExportConversation = useCallback(() => {
-    const conversationData = {
-      agent: selectedAgent,
-      messages: messages.filter(msg => !msg.isLoading),
-      exportedAt: new Date().toISOString(),
-      connectionStatus
-    };
-
-    const blob = new Blob([JSON.stringify(conversationData, null, 2)], {
-      type: 'application/json'
-    });
-    
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `grc-chat-${selectedAgent!.name.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }, [messages, selectedAgent, connectionStatus]);
 
   // Handle refresh connection
   const handleRefreshConnection = useCallback(async () => {

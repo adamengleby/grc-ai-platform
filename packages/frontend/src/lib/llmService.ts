@@ -33,6 +33,7 @@ export interface LLMResponse {
   finishReason: string;
   toolsUsed: string[];
   toolResults: any[];
+  toolCalls?: any[];
   processingTime: number;
 }
 
@@ -67,6 +68,15 @@ export interface FunctionCallResponse {
   }>;
   content: string;
   finishReason: string;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+  model?: string;
+  toolsUsed?: string[];
+  toolResults?: any[];
+  processingTime?: number;
 }
 
 /**
@@ -75,9 +85,11 @@ export interface FunctionCallResponse {
 export class LLMService {
   private tenantId: string;
   private privacyService: PrivacyProtectionService | null = null;
+  private config: LLMConfig | null = null;
 
-  constructor(tenantId: string) {
+  constructor(tenantId: string, config?: LLMConfig) {
     this.tenantId = tenantId;
+    this.config = config || null;
     this.initializePrivacyProtection();
   }
 

@@ -295,7 +295,7 @@ export const ArcherConnectionConfig: React.FC<ArcherConnectionConfigProps> = ({
         updatedConnections = [...connections, newConnection];
       }
 
-      await credentialsManager.storeCredentials(updatedConnections);
+      await credentialsManager.saveCredentials(updatedConnections);
       setConnections(updatedConnections);
       setSelectedConnection(newConnection);
       setIsEditing(false);
@@ -323,7 +323,7 @@ export const ArcherConnectionConfig: React.FC<ArcherConnectionConfigProps> = ({
 
     try {
       const updatedConnections = connections.filter(c => c.id !== connectionId);
-      await credentialsManager.storeCredentials(updatedConnections);
+      await credentialsManager.saveCredentials(updatedConnections);
       setConnections(updatedConnections);
       
       if (selectedConnection?.id === connectionId) {

@@ -20,8 +20,15 @@ export class AnalyticsService {
   // Removed unused eventListeners property
 
   constructor() {
-    // Use our new backend API server
-    this.baseUrl = import.meta.env.VITE_ANALYTICS_API_URL || 'http://localhost:3005/api/v1';
+    // Use environment-specific backend API server
+    const isDevelopment = import.meta.env.DEV;
+
+    if (isDevelopment) {
+      this.baseUrl = import.meta.env.VITE_ANALYTICS_API_URL || 'http://localhost:3005/api/v1';
+    } else {
+      // In production, use the same origin (Static Web Apps)
+      this.baseUrl = '/api/v1';
+    }
   }
 
   /**
@@ -161,21 +168,30 @@ export class AnalyticsService {
    * Subscribe to real-time events
    */
   subscribeToEvents(
-    tenantId: string, 
+    tenantId: string,
     eventTypes: string[],
     callback: (event: EventStream) => void
   ): () => void {
+    const isDevelopment = import.meta.env.DEV;
+
+    // Only enable real-time events in development
+    if (!isDevelopment) {
+      console.log('Real-time events disabled in production');
+      // Return empty unsubscribe function
+      return () => {};
+    }
+
     const socketKey = `${tenantId}-${eventTypes.join(',')}`;
-    
+
     // Get the Socket.IO server URL (remove /api/v1 from baseUrl)
     const socketUrl = this.baseUrl.replace('/api/v1', '');
-    
+
     // Create Socket.IO connection
     const socket = io(socketUrl, {
       transports: ['websocket', 'polling'],
       autoConnect: true,
     });
-    
+
     socket.on('connect', () => {
       console.log(`Socket.IO connected for tenant ${tenantId}`);
       // Subscribe to specific events

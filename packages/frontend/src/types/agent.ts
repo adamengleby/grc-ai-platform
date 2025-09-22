@@ -1,27 +1,31 @@
 export interface AIAgent {
   id: string;
+  agent_id?: string; // Alternative ID format for compatibility
   name: string;
   description: string;
   persona: string; // The agent's behavior/personality
   systemPrompt: string; // Complete instructions including useCase, capabilities, and behavior
-  
+  useCase?: string; // Use case description for compatibility
+  capabilities?: string[]; // Agent capabilities list
+
   // LLM Configuration
   llmConfigId: string; // Reference to LLM configuration
-  
+
   // MCP Server Access
   enabledMcpServers: string[]; // List of MCP server IDs this agent can use
-  
-  
+
+
   // Metadata
   isEnabled: boolean;
   createdAt: string;
+  created_at?: string; // Alternative timestamp format for compatibility
   lastUsed?: string;
   usageCount: number;
-  
+
   // Visual
   avatar?: string; // Icon or avatar for the agent
   color?: string; // Theme color for the agent
-  
+
   // Performance Metrics
   metrics?: AgentMetrics;
 }
@@ -66,6 +70,8 @@ export interface AgentPreset {
   systemPrompt: string;
   avatar: string;
   color: string;
+  useCase?: string; // Use case description
+  capabilities?: string[]; // Agent capabilities list
 }
 
 export const AGENT_PRESETS: AgentPreset[] = [

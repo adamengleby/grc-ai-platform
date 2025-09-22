@@ -14,9 +14,7 @@ import {
   AlertCircle,
   Sparkles,
   MessageSquare,
-  Activity,
   Wifi,
-  WifiOff,
   Zap,
 } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -26,7 +24,6 @@ import { createAgentService } from '@/lib/backendAgentService';
 import { AIAgent } from '@/types/agent';
 import { securityAuditLogger } from '@/lib/security/auditLogger';
 import { useMCPSSE } from '@/hooks/useMCPSSE';
-import { MCPToolProgressList } from '@/components/ui/MCPToolProgress';
 import { MCPSSEDemo } from '@/components/demo/MCPSSEDemo';
 // import { enhancedSessionValidator } from '@/lib/security/sessionValidator';
 
@@ -674,10 +671,7 @@ export const McpTestInterface: React.FC = () => {
   // MCP SSE Integration
   const {
     isConnected: mcpConnected,
-    connectionError: mcpConnectionError,
-    activeCalls: activeMCPTools,
-    callTool: callMCPTool,
-    sessionInfo: mcpSessionInfo
+    activeCalls: activeMCPTools
   } = useMCPSSE();
 
   // Auto-scroll to bottom when new messages are added
@@ -1344,7 +1338,7 @@ ${errorMessage}${suggestedActions}
                           </div>
                           <div className="text-blue-600 text-xs mb-2">{agent.description}</div>
                           <div className="flex flex-wrap gap-1">
-                            {agent.capabilities.map((cap) => (
+                            {agent.capabilities?.map((cap) => (
                               <span key={cap} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">
                                 {cap}
                               </span>

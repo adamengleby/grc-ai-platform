@@ -4,12 +4,11 @@ import { Button } from '../../app/components/ui/Button';
 import { MetricsCard } from '../../app/components/ui/MetricsCard';
 import { ProgressBar } from '../../app/components/ui/ProgressBar';
 import { StatusBadge } from '../../app/components/ui/StatusBadge';
-import { 
-  TrendingUp, 
-  TrendingDown, 
-  Shield, 
-  Users, 
-  AlertTriangle, 
+import {
+  TrendingUp,
+  Shield,
+  Users,
+  AlertTriangle,
   CheckCircle2,
   Target,
   Brain

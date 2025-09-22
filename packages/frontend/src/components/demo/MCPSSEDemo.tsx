@@ -4,9 +4,8 @@
  * Can be added to existing chat interfaces for real-time tool execution
  */
 
-import React, { useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { Button } from '@/app/components/ui/Button';
-import { Input } from '@/app/components/ui/Input';
 import { Card } from '@/app/components/ui/Card';
 import { Badge } from '@/app/components/ui/Badge';
 import { Alert } from '@/app/components/ui/Alert';
@@ -160,7 +159,7 @@ export function MCPSSEDemo({ className, onResult }: MCPSSEDemoProps) {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
           <div>
             <div className="text-gray-600">Status</div>
-            <Badge variant={isConnected ? 'success' : 'destructive'}>
+            <Badge variant={isConnected ? 'default' : 'destructive'}>
               {isConnected ? 'Connected' : 'Disconnected'}
             </Badge>
           </div>
@@ -186,7 +185,7 @@ export function MCPSSEDemo({ className, onResult }: MCPSSEDemoProps) {
           {health && (
             <div>
               <div className="text-gray-600">Health</div>
-              <Badge variant={health.status === 'healthy' ? 'success' : 'destructive'}>
+              <Badge variant={health.status === 'healthy' ? 'default' : 'destructive'}>
                 {health.status}
               </Badge>
             </div>

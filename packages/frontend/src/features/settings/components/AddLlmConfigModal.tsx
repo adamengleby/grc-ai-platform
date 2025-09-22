@@ -153,7 +153,8 @@ export default function AddLlmConfigModal({
         useSecret: initialConfig.useSecret || false,
         customHeaders: initialConfig.customHeaders || {},
         maxTokens: initialConfig.maxTokens || 4000,
-        temperature: initialConfig.temperature || 0.7
+        temperature: initialConfig.temperature || 0.7,
+        rateLimit: initialConfig.rateLimit || 100
       });
 
       // Set header pairs for custom headers

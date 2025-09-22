@@ -162,8 +162,6 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
         description: preset.description,
         persona: preset.persona,
         systemPrompt: preset.systemPrompt,
-        capabilities: preset.capabilities,
-        useCase: preset.useCase,
         avatar: preset.avatar,
         color: preset.color
       });
@@ -357,16 +355,9 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
                           )}
                         </div>
                         <div className="flex flex-wrap gap-1">
-                          {preset.capabilities.slice(0, 3).map((cap) => (
-                            <Badge key={cap} variant="outline" className="text-xs">
-                              {cap}
-                            </Badge>
-                          ))}
-                          {preset.capabilities.length > 3 && (
-                            <Badge variant="outline" className="text-xs">
-                              +{preset.capabilities.length - 3} more
-                            </Badge>
-                          )}
+                          <Badge variant="outline" className="text-xs">
+                            {preset.avatar} {preset.name}
+                          </Badge>
                         </div>
                       </div>
                     ))}

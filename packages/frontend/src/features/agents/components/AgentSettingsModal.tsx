@@ -13,8 +13,7 @@ import {
   Clock,
   X,
   Check,
-  AlertCircle,
-  Shield
+  AlertCircle
 } from 'lucide-react';
 import { AIAgent } from '../../../types/agent';
 import { createAgentService } from '../../../lib/backendAgentService';

@@ -3,7 +3,6 @@
  * Shows real-time progress for MCP tool execution with SSE streaming
  */
 
-import React from 'react';
 import { clsx } from 'clsx';
 import { 
   Loader2, 

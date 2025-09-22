@@ -41,7 +41,7 @@ export const ArcherAuthModal: React.FC<ArcherAuthModalProps> = ({
   isOpen,
   onClose,
   onAuthenticated,
-  tenantId
+  tenantId: _tenantId
 }) => {
   // Load saved values from localStorage or use defaults
   const [formData, setFormData] = useState<AuthFormData>(() => {

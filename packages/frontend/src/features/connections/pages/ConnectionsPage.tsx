@@ -210,7 +210,7 @@ export const ConnectionsPage: React.FC = () => {
             password: passwordToSave,
             instanceId: connection.instanceName || '',
             instanceName: connection.instanceName || '',
-            userDomainId: null, // Default user domain (null for no domain)
+            userDomainId: '', // Default user domain (empty string for no domain)
             isDefault: false, // Will be set appropriately
             created: new Date().toISOString(),
             lastTested: connection.lastTested?.toISOString(),
@@ -352,12 +352,13 @@ export const ConnectionsPage: React.FC = () => {
         let errorMessage = testResult.message || 'Unknown error';
         if (testResult.error && typeof testResult.error === 'object') {
           // Extract meaningful error details from Archer API error object
-          if (testResult.error.Description) {
-            errorMessage = testResult.error.Description.replace('ValidationMessageTemplates:', '');
-          } else if (testResult.error.MessageKey) {
-            errorMessage = testResult.error.MessageKey.replace('ValidationMessageTemplates:', '');
-          } else if (testResult.error.Reason) {
-            errorMessage = `${testResult.error.Reason}: Invalid credentials or configuration`;
+          const error = testResult.error as any;
+          if (error.Description) {
+            errorMessage = error.Description.replace('ValidationMessageTemplates:', '');
+          } else if (error.MessageKey) {
+            errorMessage = error.MessageKey.replace('ValidationMessageTemplates:', '');
+          } else if (error.Reason) {
+            errorMessage = `${error.Reason}: Invalid credentials or configuration`;
           } else {
             errorMessage = JSON.stringify(testResult.error, null, 2);
           }

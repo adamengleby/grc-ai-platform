@@ -165,7 +165,7 @@ export const BackendTestComponent: React.FC = () => {
       </div>
 
       {error && (
-        <Alert type="error" className="mb-4">
+        <Alert variant="destructive" className="mb-4">
           <strong>Error:</strong> {error}
         </Alert>
       )}
@@ -188,7 +188,7 @@ export const BackendTestComponent: React.FC = () => {
         <Button 
           onClick={createTestAgent}
           disabled={isLoading}
-          variant="primary"
+          variant="default"
         >
           Create Test Agent
         </Button>
@@ -215,11 +215,11 @@ export const BackendTestComponent: React.FC = () => {
           <h4 className="font-medium mb-2">Agents from Database ({agents.length}):</h4>
           <div className="space-y-2 max-h-60 overflow-y-auto">
             {agents.map((agent, index) => (
-              <div key={agent.agent_id || index} className="p-3 bg-gray-50 rounded border text-sm">
+              <div key={agent.id || index} className="p-3 bg-gray-50 rounded border text-sm">
                 <div className="font-medium">{agent.name}</div>
                 <div className="text-gray-600">{agent.description}</div>
                 <div className="text-xs text-gray-500 mt-1">
-                  ID: {agent.agent_id} | Created: {agent.created_at ? new Date(agent.created_at).toLocaleString() : 'Unknown'}
+                  ID: {agent.id} | Created: {agent.createdAt ? new Date(agent.createdAt).toLocaleString() : 'Unknown'}
                 </div>
               </div>
             ))}

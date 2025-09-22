@@ -139,6 +139,8 @@ export interface TenantMcpServerConfiguration {
   id: string;
   tenantId: string; // Partition key
   serverId: string;
+  name?: string; // Server name for display (should be looked up from serverId)
+  endpoint?: string; // Server endpoint (should be looked up from serverId)
   enabled: boolean;
   enabledAt?: string;
   connectionMapping: {
