@@ -8,7 +8,9 @@ import { AIAgent } from '@/types/agent';
 import { User, Tenant, UserRole } from '@/types/tenant';
 
 // API Configuration
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3005/api/v1';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV
+  ? 'http://localhost:3005/api/v1'
+  : 'https://func-grc-backend-prod.azurewebsites.net/api/v1');
 
 // Request types
 interface ApiRequestOptions {

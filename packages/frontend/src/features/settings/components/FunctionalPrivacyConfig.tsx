@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { buildApiUrl } from '@/utils/apiUrls';
 import { Card, CardHeader, CardTitle, CardContent } from '@/app/components/ui/Card';
 import { Button } from '@/app/components/ui/Button';
 import { Label } from '@/app/components/ui/Label';
@@ -109,7 +110,7 @@ export default function FunctionalPrivacyConfig({
         hasTenant: !!headers['X-Tenant-ID'] 
       });
       
-      const response = await fetch(`http://localhost:3005/api/v1/privacy/settings?scope=${scope}`, {
+      const response = await fetch(buildApiUrl(`privacy/settings?scope=${scope}`), {
         method: 'GET',
         headers
       });
@@ -158,7 +159,7 @@ export default function FunctionalPrivacyConfig({
             'X-Tenant-ID': 'A1B2C3D4-E5F6-7G8H-9I0J-K1L2M3N4O5P6'
           };
       
-      const response = await fetch('http://localhost:3005/api/v1/privacy/settings', {
+      const response = await fetch(buildApiUrl('privacy/settings'), {
         method: 'PUT',
         headers,
         body: JSON.stringify(payload)
@@ -196,7 +197,7 @@ export default function FunctionalPrivacyConfig({
             'X-Tenant-ID': 'A1B2C3D4-E5F6-7G8H-9I0J-K1L2M3N4O5P6'
           };
       
-      const response = await fetch(`http://localhost:3005/api/v1/privacy/settings?scope=${scope}`, {
+      const response = await fetch(buildApiUrl(`privacy/settings?scope=${scope}`), {
         method: 'DELETE',
         headers
       });

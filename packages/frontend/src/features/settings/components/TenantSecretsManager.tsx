@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { buildApiUrl } from '@/utils/apiUrls';
 import { Card, CardHeader, CardTitle, CardContent } from '@/app/components/ui/Card';
 import { Button } from '@/app/components/ui/Button';
 import { Input } from '@/app/components/ui/Input';
@@ -74,7 +75,7 @@ export default function TenantSecretsManager({
     
     setIsLoading(true);
     try {
-      const response = await fetch('/api/v1/tenant-secrets', {
+      const response = await fetch(buildApiUrl('tenant-secrets'), {
         headers: {
           'x-tenant-id': tenant.id,
           'Content-Type': 'application/json'
@@ -103,7 +104,7 @@ export default function TenantSecretsManager({
 
     setIsSaving(true);
     try {
-      const response = await fetch('/api/v1/tenant-secrets', {
+      const response = await fetch(buildApiUrl('tenant-secrets'), {
         method: 'POST',
         headers: {
           'x-tenant-id': tenant?.id || '',
@@ -150,7 +151,7 @@ export default function TenantSecretsManager({
     if (!confirm(`Are you sure you want to delete the secret "${secretName}"?`)) return;
 
     try {
-      const response = await fetch(`/api/v1/tenant-secrets/${secretName}`, {
+      const response = await fetch(buildApiUrl(`tenant-secrets/${secretName}`), {
         method: 'DELETE',
         headers: {
           'x-tenant-id': tenant?.id || '',
@@ -177,7 +178,7 @@ export default function TenantSecretsManager({
     }
 
     try {
-      const response = await fetch(`/api/v1/tenant-secrets/${secretName}`, {
+      const response = await fetch(buildApiUrl(`tenant-secrets/${secretName}`), {
         headers: {
           'x-tenant-id': tenant?.id || '',
           'Content-Type': 'application/json'

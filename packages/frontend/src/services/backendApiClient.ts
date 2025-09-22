@@ -6,8 +6,10 @@
 
 import { AIAgent } from '@/types/agent';
 
-// API Configuration - use direct backend URL in development since no proxy is configured
-const API_BASE_URL = import.meta.env.DEV ? 'http://localhost:3005/api/v1' : 'http://localhost:3005/api/v1';
+// API Configuration - use direct backend URL in development, Azure Functions in production
+const API_BASE_URL = import.meta.env.DEV
+  ? 'http://localhost:3005/api/v1'
+  : (import.meta.env.VITE_API_BASE_URL || 'https://func-grc-backend-prod.azurewebsites.net/api/v1');
 
 // Response types matching our backend
 interface BackendResponse<T> {

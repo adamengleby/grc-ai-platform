@@ -27,7 +27,9 @@ export interface MCPServerRegistry {
 }
 
 export class MCPRegistryClient {
-  private readonly backendUrl = 'http://localhost:3005/api/v1';
+  private readonly backendUrl = import.meta.env.DEV
+    ? 'http://localhost:3005/api/v1'
+    : 'https://func-grc-backend-prod.azurewebsites.net/api/v1';
 
   /**
    * Get enabled MCP servers for current tenant from backend registry

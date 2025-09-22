@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { buildApiUrl } from '@/utils/apiUrls';
 import { Dialog, DialogContent } from '../../../app/components/ui/Dialog';
 import { Button } from '../../../app/components/ui/Button';
 import { Input } from '../../../app/components/ui/Input';
@@ -49,14 +50,14 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({
   const loadAvailableConfigs = async () => {
     try {
       // Load available LLM configs from database API
-      const llmResponse = await fetch('/api/v1/simple-llm-configs');
+      const llmResponse = await fetch(buildApiUrl('simple-llm-configs'));
       const llmData = await llmResponse.json();
       if (llmData.success) {
         setAvailableLlmConfigs(llmData.data.llm_configs || []);
       }
 
       // Load available MCP servers from database API
-      const mcpResponse = await fetch('/api/v1/simple-mcp-configs');
+      const mcpResponse = await fetch(buildApiUrl('simple-mcp-configs'));
       const mcpData = await mcpResponse.json();
       if (mcpData.success) {
         setAvailableMcpServers(mcpData.data.mcp_servers || []);

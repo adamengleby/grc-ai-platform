@@ -9,7 +9,9 @@ import {
   SAMLTestResult
 } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3005/api/v1';
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV
+  ? 'http://localhost:3005/api/v1'
+  : 'https://func-grc-backend-prod.azurewebsites.net/api/v1');
 
 class TenantManagementApiService {
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {

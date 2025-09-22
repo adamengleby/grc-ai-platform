@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { buildApiUrl } from '@/utils/apiUrls';
 import { Button } from '@/app/components/ui/Button';
 import { Input } from '@/app/components/ui/Input';
 import { Label } from '@/app/components/ui/Label';
@@ -73,7 +74,7 @@ export default function SecretSelector({
     
     setIsLoading(true);
     try {
-      const response = await fetch('/api/v1/tenant-secrets', {
+      const response = await fetch(buildApiUrl('tenant-secrets'), {
         headers: {
           'x-tenant-id': tenant.id,
           'Content-Type': 'application/json'
@@ -104,7 +105,7 @@ export default function SecretSelector({
 
     setIsCreating(true);
     try {
-      const response = await fetch('/api/v1/tenant-secrets', {
+      const response = await fetch(buildApiUrl('tenant-secrets'), {
         method: 'POST',
         headers: {
           'x-tenant-id': tenant?.id || '',

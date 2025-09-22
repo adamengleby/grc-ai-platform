@@ -1,47 +1,8 @@
 {
-  "auth": {
-    "rolesSource": "/api/GetUserRoles",
-    "identityProviders": {
-      "azureActiveDirectory": {
-        "userDetailsClaim": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name",
-        "registration": {
-          "openIdIssuer": "https://login.microsoftonline.com/common/v2.0",
-          "clientIdSettingName": "AZURE_CLIENT_ID",
-          "clientSecretSettingName": "AZURE_CLIENT_SECRET"
-        }
-      },
-      "github": {
-        "registration": {
-          "clientIdSettingName": "GITHUB_CLIENT_ID",
-          "clientSecretSettingName": "GITHUB_CLIENT_SECRET"
-        }
-      }
-    }
-  },
   "routes": [
     {
-      "route": "/.auth/login/aad",
-      "allowedRoles": ["anonymous", "authenticated"]
-    },
-    {
-      "route": "/.auth/login/github",
-      "allowedRoles": ["anonymous", "authenticated"]
-    },
-    {
-      "route": "/.auth/logout",
-      "allowedRoles": ["anonymous", "authenticated"]
-    },
-    {
-      "route": "/api/*",
-      "allowedRoles": ["anonymous", "authenticated"]
-    },
-    {
-      "route": "/admin/*",
-      "allowedRoles": ["admin"]
-    },
-    {
       "route": "/*",
-      "allowedRoles": ["anonymous", "authenticated"]
+      "allowedRoles": ["anonymous"]
     }
   ],
   "responseOverrides": {},

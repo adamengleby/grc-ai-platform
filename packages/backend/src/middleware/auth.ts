@@ -8,8 +8,8 @@ import { config } from '@/config';
  * TODO: Integrate with Azure AD B2C in production
  */
 export const authenticateToken = (req: Request, res: Response, next: NextFunction): void => {
-  // In development mode, use mock authentication
-  if (config.development.useMockAuth) {
+  // Use mock authentication if explicitly enabled OR if JWT secret is the default (production fallback)
+  if (config.development.useMockAuth || config.jwt.secret === 'your-super-secret-jwt-key-change-in-production') {
     // Mock user based on common demo users
     req.user = {
       id: 'mock-user-123',

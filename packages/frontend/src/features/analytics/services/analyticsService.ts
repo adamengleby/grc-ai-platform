@@ -26,8 +26,8 @@ export class AnalyticsService {
     if (isDevelopment) {
       this.baseUrl = import.meta.env.VITE_ANALYTICS_API_URL || 'http://localhost:3005/api/v1';
     } else {
-      // In production, use the same origin (Static Web Apps)
-      this.baseUrl = '/api/v1';
+      // In production, use the Azure Functions backend
+      this.baseUrl = import.meta.env.VITE_API_BASE_URL || 'https://func-grc-backend-prod.azurewebsites.net/api/v1';
     }
   }
 
