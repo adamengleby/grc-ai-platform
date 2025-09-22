@@ -162,14 +162,6 @@ jobs:
       run: |
         npm install
 
-    - name: Build frontend
-      run: |
-        cd packages/frontend
-        npm run build || echo "Build completed with warnings"
-      env:
-        VITE_API_BASE_URL: https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/v1
-        VITE_MCP_SERVER_URL: https://grc-mcp-server-prod.eastus.azurecontainer.io:3006
-
     - name: Deploy to Azure Static Web Apps
       uses: Azure/static-web-apps-deploy@v1
       with:
@@ -178,7 +170,11 @@ jobs:
         action: "upload"
         app_location: "/packages/frontend"
         output_location: "dist"
-        skip_app_build: true
+        app_build_command: "npm run build"
+        skip_app_build: false
+      env:
+        VITE_API_BASE_URL: https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/v1
+        VITE_MCP_SERVER_URL: https://grc-mcp-server-prod.eastus.azurecontainer.io:3006
 
   # Post-deployment validation
   validate-deployment:
