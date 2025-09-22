@@ -115,6 +115,11 @@ jobs:
       run: |
         npm install
 
+    - name: Build MCP Server
+      run: |
+        cd packages/mcp-server
+        npm run build
+
     - name: Build MCP Server Docker image
       run: |
         cd packages/mcp-server
