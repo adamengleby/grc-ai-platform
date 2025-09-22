@@ -1,0 +1,15 @@
+{
+  "name": "grc-backend-azure-functions",
+  "version": "1.0.0",
+  "description": "GRC Platform Backend for Azure Functions",
+  "main": "index.js",
+  "engines": {
+    "node": "~20"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.0.0"
+  },
+  "scripts": {
+    "start": "func start"
+  }
+}
