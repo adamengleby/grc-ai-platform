@@ -158,10 +158,6 @@ jobs:
       with:
         node-version: ${{ env.NODE_VERSION }}
 
-    - name: Install monorepo dependencies
-      run: |
-        npm install
-
     - name: Deploy to Azure Static Web Apps
       uses: Azure/static-web-apps-deploy@v1
       with:
@@ -170,7 +166,7 @@ jobs:
         action: "upload"
         app_location: "/packages/frontend"
         output_location: "dist"
-        app_build_command: "npm run build"
+        app_build_command: "cd .. && npm install && cd packages/frontend && rm -rf node_modules && npm install && npm run build"
         skip_app_build: false
       env:
         VITE_API_BASE_URL: https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/v1
