@@ -40,22 +40,24 @@ jobs:
         ls -la
         echo "Looking for infrastructure directory:"
         find . -name "infrastructure" -type d
+        echo "Checking parent directory:"
+        ls -la ../ | grep infrastructure || echo "Not found in parent directory"
 
     - name: Terraform Init
       run: |
-        cd infrastructure
+        cd ../infrastructure
         terraform init
 
     - name: Terraform Plan
       run: |
-        cd infrastructure
+        cd ../infrastructure
         terraform plan -var-file="terraform.tfvars"
 
     - name: Terraform Apply
       if: github.ref == 'refs/heads/master'
       id: terraform
       run: |
-        cd infrastructure
+        cd ../infrastructure
         terraform apply -auto-approve -var-file="terraform.tfvars"
         echo "function_app_name=$(terraform output -raw function_app_name)" >> $GITHUB_OUTPUT
         echo "static_web_app_url=$(terraform output -raw static_web_app_url)" >> $GITHUB_OUTPUT
