@@ -226,6 +226,10 @@ class AnalyticsServer {
     }, 10000);
   }
 
+  public getApp(): express.Application {
+    return this.app;
+  }
+
   public start(): void {
     try {
       // Validate configuration
@@ -258,6 +262,14 @@ Ready to serve analytics data! 📊
   }
 }
 
-// Start the server
+// Create server instance
 const server = new AnalyticsServer();
-server.start();
+
+// Export app for Azure Functions and other uses
+export const app = server.getApp();
+export { server };
+
+// Start the server only if this file is run directly (not imported)
+if (require.main === module) {
+  server.start();
+}
