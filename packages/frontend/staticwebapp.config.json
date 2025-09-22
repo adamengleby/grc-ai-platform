@@ -7,7 +7,11 @@
   ],
   "responseOverrides": {},
   "mimeTypes": {
-    ".json": "text/json"
+    ".json": "application/json",
+    ".js": "application/javascript",
+    ".mjs": "application/javascript",
+    ".tsx": "application/javascript",
+    ".ts": "application/javascript"
   },
   "navigationFallback": {
     "rewrite": "/index.html",
