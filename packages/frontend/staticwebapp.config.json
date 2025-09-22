@@ -9,7 +9,8 @@
   "mimeTypes": {
     ".json": "text/json"
   },
-  "platform": {
-    "apiRuntime": "node:18"
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/images/*.{png,jpg,gif,svg}", "/css/*", "/js/*"]
   }
 }

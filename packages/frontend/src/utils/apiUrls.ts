@@ -11,27 +11,35 @@ export const getBackendApiUrl = (): string => {
   const isDev = import.meta.env.DEV;
   const mode = import.meta.env.MODE;
   const baseUrl = import.meta.env.VITE_API_BASE_URL;
+  const hostname = window?.location?.hostname;
 
   // Debug logging to help diagnose URL issues
   console.log('🔍 Environment Detection:', {
     isDev,
     mode,
     baseUrl,
-    hostname: window?.location?.hostname
+    hostname,
+    'import.meta.env': import.meta.env
   });
 
+  // Always use the build-time configured API URL if available
+  if (baseUrl) {
+    console.log('📍 Using configured API URL from VITE_API_BASE_URL:', baseUrl);
+    return baseUrl;
+  }
+
   // Force production mode for Azure Static Web Apps domains
-  const isAzureStaticWebApps = window?.location?.hostname?.includes('azurestaticapps.net');
+  const isAzureStaticWebApps = hostname?.includes('azurestaticapps.net');
 
   if (isDev && !isAzureStaticWebApps) {
     console.log('📍 Using development API URL');
     return 'http://localhost:3005/api/v1';
   }
 
-  // In production or on Azure Static Web Apps, use the Azure Functions backend
-  const productionUrl = baseUrl || 'https://func-grc-backend-prod.azurewebsites.net/api/v1';
-  console.log('📍 Using production API URL:', productionUrl);
-  return productionUrl;
+  // Fallback to Azure Functions backend
+  const fallbackUrl = 'https://func-grc-backend-prod.azurewebsites.net/api/v1';
+  console.log('📍 Using fallback production API URL:', fallbackUrl);
+  return fallbackUrl;
 };
 
 /**
