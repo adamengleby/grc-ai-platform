@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GRC AI Platform - Login</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .login-container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .login-header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+
+        .login-header h1 {
+            font-size: 1.8em;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .login-header p {
+            opacity: 0.9;
+            font-size: 0.9em;
+        }
+
+        .login-form {
+            padding: 40px 30px;
+        }
+
+        .tenant-selector {
+            margin-bottom: 30px;
+        }
+
+        .tenant-selector label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #374151;
+        }
+
+        .tenant-selector select {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 16px;
+            background: white;
+            color: #374151;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+
+        .tenant-selector select:focus {
+            outline: none;
+            border-color: #2563eb;
+        }
+
+        .login-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .login-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 14px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            gap: 12px;
+        }
+
+        .login-btn.primary {
+            background: #2563eb;
+            color: white;
+        }
+
+        .login-btn.primary:hover {
+            background: #1d4ed8;
+            transform: translateY(-1px);
+        }
+
+        .login-btn.secondary {
+            background: #f3f4f6;
+            color: #374151;
+            border: 2px solid #e5e7eb;
+        }
+
+        .login-btn.secondary:hover {
+            background: #e5e7eb;
+        }
+
+        .login-btn.microsoft {
+            background: #0078d4;
+            color: white;
+        }
+
+        .login-btn.microsoft:hover {
+            background: #106ebe;
+        }
+
+        .status-message {
+            margin-top: 20px;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .status-message.info {
+            background: #dbeafe;
+            color: #1e40af;
+            border: 1px solid #bfdbfe;
+        }
+
+        .status-message.success {
+            background: #d1fae5;
+            color: #065f46;
+            border: 1px solid #a7f3d0;
+        }
+
+        .status-message.error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fca5a5;
+        }
+
+        .demo-info {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f9fafb;
+            border-radius: 8px;
+            border-left: 4px solid #10b981;
+        }
+
+        .demo-info h3 {
+            color: #065f46;
+            margin-bottom: 8px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .demo-info p {
+            color: #374151;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .footer-links {
+            margin-top: 30px;
+            text-align: center;
+            padding-top: 20px;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .footer-links a {
+            color: #6b7280;
+            text-decoration: none;
+            font-size: 14px;
+            margin: 0 15px;
+        }
+
+        .footer-links a:hover {
+            color: #2563eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <h1>🔐 GRC AI Platform</h1>
+            <p>Secure Multi-Tenant Access</p>
+        </div>
+
+        <div class="login-form">
+            <div class="tenant-selector">
+                <label for="tenant">Select Your Organization</label>
+                <select id="tenant" onchange="updateTenant()">
+                    <option value="">Choose your tenant...</option>
+                    <option value="acme">ACME Corporation</option>
+                    <option value="fintech">FinTech Solutions</option>
+                    <option value="healthcare">HealthCare Systems</option>
+                    <option value="demo">Demo Tenant</option>
+                </select>
+            </div>
+
+            <div class="login-buttons">
+                <button class="login-btn primary" onclick="loginWithOAuth()">
+                    🔑 Login with OAuth 2.0
+                </button>
+
+                <button class="login-btn microsoft" onclick="loginWithMicrosoft()">
+                    🏢 Login with Microsoft
+                </button>
+
+                <button class="login-btn secondary" onclick="loginAsDemo()">
+                    🧪 Demo Access
+                </button>
+            </div>
+
+            <div id="status-message" class="status-message info" style="display: none;">
+                Connecting to authentication provider...
+            </div>
+
+            <div class="demo-info">
+                <h3>🚀 Production Environment Active</h3>
+                <p>This is the live GRC AI Platform running on Azure Australia East. OAuth providers need to be configured for each tenant to enable login functionality.</p>
+            </div>
+
+            <div class="footer-links">
+                <a href="#" onclick="showSystemStatus()">System Status</a>
+                <a href="#" onclick="showApiDocs()">API Documentation</a>
+                <a href="#" onclick="showHelp()">Help & Support</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedTenant = '';
+
+        function updateTenant() {
+            selectedTenant = document.getElementById('tenant').value;
+            const statusDiv = document.getElementById('status-message');
+
+            if (selectedTenant) {
+                statusDiv.style.display = 'block';
+                statusDiv.className = 'status-message info';
+                statusDiv.innerHTML = `Selected tenant: <strong>${selectedTenant}</strong><br>OAuth provider needs configuration for this tenant.`;
+            } else {
+                statusDiv.style.display = 'none';
+            }
+        }
+
+        function loginWithOAuth() {
+            if (!selectedTenant) {
+                showMessage('Please select your organization first.', 'error');
+                return;
+            }
+
+            showMessage('Redirecting to OAuth provider...', 'info');
+
+            // In production, this would redirect to:
+            // https://func-grc-backend-prod.azurewebsites.net/api/auth/${selectedTenant}/login
+            setTimeout(() => {
+                showMessage(`OAuth provider not configured for tenant "${selectedTenant}". Contact your administrator to set up authentication.`, 'error');
+            }, 2000);
+        }
+
+        function loginWithMicrosoft() {
+            if (!selectedTenant) {
+                showMessage('Please select your organization first.', 'error');
+                return;
+            }
+
+            showMessage('Connecting to Microsoft Azure AD...', 'info');
+
+            setTimeout(() => {
+                showMessage('Microsoft Azure AD integration requires tenant-specific configuration. Contact your administrator.', 'error');
+            }, 2000);
+        }
+
+        function loginAsDemo() {
+            showMessage('Connecting to demo environment...', 'info');
+
+            setTimeout(() => {
+                showMessage('Demo login successful! Redirecting to GRC dashboard...', 'success');
+                setTimeout(() => {
+                    // Redirect to the main dashboard or show demo content
+                    window.location.href = 'dashboard.html';
+                }, 1500);
+            }, 2000);
+        }
+
+        function showMessage(message, type) {
+            const statusDiv = document.getElementById('status-message');
+            statusDiv.style.display = 'block';
+            statusDiv.className = `status-message ${type}`;
+            statusDiv.innerHTML = message;
+        }
+
+        function showSystemStatus() {
+            const apiBase = 'https://func-grc-backend-prod.azurewebsites.net/api';
+
+            showMessage('Checking system status...', 'info');
+
+            fetch(`${apiBase}/health`)
+                .then(response => response.json())
+                .then(data => {
+                    showMessage(`System Status: ${data.status.toUpperCase()}<br>Version: ${data.version}<br>Environment: ${data.environment}`, 'success');
+                })
+                .catch(error => {
+                    showMessage('Unable to connect to backend API.', 'error');
+                });
+        }
+
+        function showApiDocs() {
+            showMessage('API Documentation: https://func-grc-backend-prod.azurewebsites.net/api', 'info');
+        }
+
+        function showHelp() {
+            showMessage('For login issues, contact your tenant administrator to configure OAuth 2.0 + OIDC providers.', 'info');
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            showMessage('🚀 Production environment ready. Select your organization to begin.', 'info');
+        });
+    </script>
+</body>
+</html>

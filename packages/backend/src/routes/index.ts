@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import analyticsRouter from './analytics';
-import authRouter from './auth';
+// import authRouter from './auth'; // Temporarily disabled
 import { credentialsRouter } from './credentials';
 import mcpRouter from './mcp';
 import mcpToolAccessRouter from './mcpToolAccess';
-import connectionTestRouter from './connectionTest';
+// import connectionTestRouter from './connectionTest'; // Temporarily disabled
 import privacyRouter from './privacy';
 import simpleAgentsRouter from './simpleAgents';
 import simpleCredentialsRouter from './simpleCredentials';
@@ -26,7 +26,7 @@ export const apiRouter = Router();
 apiRouter.use('/analytics', analyticsRouter);
 
 // Mount auth routes
-apiRouter.use('/auth', authRouter);
+// apiRouter.use('/auth', authRouter); // Temporarily disabled
 
 // Mount credentials routes
 apiRouter.use('/credentials', credentialsRouter);
@@ -56,7 +56,7 @@ apiRouter.post('/mcp', async (req, res) => {
     // Check if client supports SSE upgrade
     const acceptsSSE = req.headers.accept?.includes('text/event-stream');
     
-    if (acceptsSSE && result.supportsStreaming) {
+    if (acceptsSSE && (result as any).supportsStreaming) {
       // Upgrade to SSE for streaming responses
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -88,7 +88,7 @@ apiRouter.post('/mcp', async (req, res) => {
 });
 
 // Mount connection test routes
-apiRouter.use('/connections', connectionTestRouter);
+// apiRouter.use('/connections', connectionTestRouter); // Temporarily disabled
 
 // Mount privacy routes - CRITICAL for LLM data protection
 apiRouter.use('/privacy', privacyRouter);

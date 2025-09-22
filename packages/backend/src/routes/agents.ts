@@ -15,9 +15,8 @@ const agentService = new AgentService();
 // Simple mock auth middleware for development
 const mockAuth = (req: Request, res: Response, next: any) => {
   req.user = {
-    userId: 'U1A2B3C4-D5E6-F7G8-H9I0-J1K2L3M4N5O6',
+    id: 'U1A2B3C4-D5E6-F7G8-H9I0-J1K2L3M4N5O6',
     tenantId: 'A1B2C3D4-E5F6-7G8H-9I0J-K1L2M3N4O5P6',
-    email: 'demo@example.com',
     roles: ['TenantOwner']
   };
   next();
@@ -49,7 +48,7 @@ router.get('/',
   async (req: Request, res: Response) => {
     try {
       const tenantId = req.user?.tenantId;
-      const userId = req.user?.userId;
+      const userId = req.user?.id;
 
       if (!tenantId) {
         return res.status(400).json({ 
@@ -169,7 +168,7 @@ router.post('/',
       }
 
       const tenantId = req.user?.tenantId!;
-      const userId = req.user?.userId!;
+      const userId = req.user?.id!;
       
       const agent = await agentService.createAgent(tenantId, userId, req.body);
 
@@ -221,7 +220,7 @@ router.put('/:agentId',
       }
 
       const tenantId = req.user?.tenantId!;
-      const userId = req.user?.userId!;
+      const userId = req.user?.id!;
       const agentId = req.params.agentId;
       
       const agent = await agentService.updateAgent(tenantId, userId, agentId, req.body);
@@ -272,7 +271,7 @@ router.delete('/:agentId',
       }
 
       const tenantId = req.user?.tenantId!;
-      const userId = req.user?.userId!;
+      const userId = req.user?.id!;
       const agentId = req.params.agentId;
       
       const deleted = await agentService.deleteAgent(tenantId, userId, agentId);
