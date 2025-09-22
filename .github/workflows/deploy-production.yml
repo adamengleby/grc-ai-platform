@@ -135,6 +135,7 @@ jobs:
       uses: azure/aci-deploy@v1
       with:
         resource-group: rg-grc-ai-platform-prod
+        location: eastus
         dns-name-label: grc-mcp-server-prod
         image: ${{ env.CONTAINER_REGISTRY }}/${{ env.MCP_IMAGE_NAME }}:${{ github.sha }}
         registry-login-server: ${{ env.CONTAINER_REGISTRY }}
