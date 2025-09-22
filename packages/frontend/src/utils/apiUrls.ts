@@ -26,8 +26,8 @@ export const getBackendApiUrl = (): string => {
   const isAzureStaticWebApps = hostname?.includes('azurestaticapps.net');
 
   if (isAzureStaticWebApps) {
-    // ALWAYS use external Azure Functions when on Azure Static Web Apps
-    const externalUrl = baseUrl || 'https://func-grc-backend-prod.azurewebsites.net/api/v1';
+    // ALWAYS use external Azure App Service when on Azure Static Web Apps
+    const externalUrl = baseUrl || 'https://grc-backend-prod.azurewebsites.net/api/v1';
     console.log('📍 Azure Static Web Apps detected - using external API:', externalUrl);
     return externalUrl;
   }
@@ -43,8 +43,8 @@ export const getBackendApiUrl = (): string => {
     return 'http://localhost:3005/api/v1';
   }
 
-  // Fallback to Azure Functions backend
-  const fallbackUrl = 'https://func-grc-backend-prod.azurewebsites.net/api/v1';
+  // Fallback to Azure App Service backend
+  const fallbackUrl = 'https://grc-backend-prod.azurewebsites.net/api/v1';
   console.log('📍 Using fallback production API URL:', fallbackUrl);
   return fallbackUrl;
 };

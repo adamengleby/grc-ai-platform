@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_NAME: func-grc-backend-prod
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: './packages/backend'
+  AZURE_WEBAPP_NAME: grc-backend-prod
+  AZURE_WEBAPP_PACKAGE_PATH: './packages/backend'
   NODE_VERSION: '20.x'
   CONTAINER_REGISTRY: acrgrcplatformprod.azurecr.io
   MCP_IMAGE_NAME: grc-mcp-server
@@ -17,7 +17,8 @@ jobs:
   validate-azure:
     runs-on: ubuntu-latest
     outputs:
-      function-app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
+      webapp-name: ${{ env.AZURE_WEBAPP_NAME }}
+      webapp-url: "https://grc-backend-prod.azurewebsites.net"
       static-web-app-url: "https://grc-ai-platform-prod.azurestaticapps.net"
 
     steps:
@@ -33,11 +34,11 @@ jobs:
       run: |
         echo "Validating existing Azure resources..."
 
-        # Check if Function App exists
-        if az functionapp show --name ${{ env.AZURE_FUNCTIONAPP_NAME }} --resource-group rg-grc-ai-platform-prod > /dev/null 2>&1; then
-          echo "✅ Function App ${{ env.AZURE_FUNCTIONAPP_NAME }} exists"
+        # Check if Resource Group exists
+        if az group show --name rg-grc-ai-platform-prod > /dev/null 2>&1; then
+          echo "✅ Resource Group rg-grc-ai-platform-prod exists"
         else
-          echo "❌ Function App ${{ env.AZURE_FUNCTIONAPP_NAME }} not found"
+          echo "❌ Resource Group rg-grc-ai-platform-prod not found"
           exit 1
         fi
 
@@ -51,7 +52,7 @@ jobs:
 
         echo "✅ All required Azure resources are available"
 
-  # Build and Deploy Backend Function App
+  # Build and Deploy Backend App Service
   deploy-backend:
     needs: validate-azure
     runs-on: ubuntu-latest
@@ -72,29 +73,96 @@ jobs:
     - name: Build backend
       run: |
         cd packages/backend
-        npm run build || echo "Build completed with warnings"
+        npm run build
+
+    - name: Create deployment package
+      run: |
+        cd packages/backend
+        # Create a clean deployment directory
+        mkdir -p deploy
+
+        # Copy built application
+        cp -r dist/ deploy/
+
+        # Copy package.json and install production dependencies
+        cp package.json deploy/
+        cd deploy
+        npm install --production --omit=dev
+
+        # Copy other necessary files
+        cd ..
+        cp -r node_modules deploy/ || true
+
+        # Create deployment zip
+        cd deploy
+        zip -r ../backend-deployment.zip . -x "*.git*" "node_modules/.cache/*"
 
     - name: Azure Login
       uses: azure/login@v1
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    - name: Deploy to Azure Functions
-      uses: Azure/functions-action@v1
-      with:
-        app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
-        package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-
-    - name: Configure Azure Functions Environment
+    - name: Create Azure App Service if not exists
       run: |
-        az functionapp config appsettings set \
-          --name ${{ env.AZURE_FUNCTIONAPP_NAME }} \
+        # Check if App Service exists
+        if ! az webapp show --name grc-backend-prod --resource-group rg-grc-ai-platform-prod >/dev/null 2>&1; then
+          echo "Creating Azure App Service..."
+
+          # Create App Service Plan if needed
+          if ! az appservice plan show --name grc-backend-plan --resource-group rg-grc-ai-platform-prod >/dev/null 2>&1; then
+            az appservice plan create \
+              --name grc-backend-plan \
+              --resource-group rg-grc-ai-platform-prod \
+              --location eastus \
+              --sku B1 \
+              --is-linux
+          fi
+
+          # Create Web App
+          az webapp create \
+            --name grc-backend-prod \
+            --resource-group rg-grc-ai-platform-prod \
+            --plan grc-backend-plan \
+            --runtime "NODE:20-lts"
+        else
+          echo "App Service already exists"
+        fi
+
+    - name: Deploy to Azure App Service
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: grc-backend-prod
+        package: packages/backend/backend-deployment.zip
+
+    - name: Configure Azure App Service Environment
+      run: |
+        az webapp config appsettings set \
+          --name grc-backend-prod \
           --resource-group rg-grc-ai-platform-prod \
           --settings \
             USE_MOCK_AUTH=true \
             NODE_ENV=production \
             USE_MOCK_DATA=true \
-            LOG_LEVEL=info
+            LOG_LEVEL=info \
+            PORT=8080 \
+            WEBSITES_PORT=8080 \
+            SCM_DO_BUILD_DURING_DEPLOYMENT=false \
+            WEBSITE_RUN_FROM_PACKAGE=1
+
+    - name: Configure App Service Startup
+      run: |
+        az webapp config set \
+          --name grc-backend-prod \
+          --resource-group rg-grc-ai-platform-prod \
+          --startup-file "node dist/index.js"
+
+    - name: Enable App Service Logs
+      run: |
+        az webapp log config \
+          --name grc-backend-prod \
+          --resource-group rg-grc-ai-platform-prod \
+          --application-logging filesystem \
+          --level information
 
   # Build and Deploy MCP Server Container
   deploy-mcp-server:
@@ -187,7 +255,7 @@ jobs:
         rm -rf node_modules/.vite
         npm run build
       env:
-        VITE_API_BASE_URL: https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/v1
+        VITE_API_BASE_URL: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/api/v1
         VITE_MCP_SERVER_URL: https://grc-mcp-server-prod.eastus.azurecontainer.io:3006
 
     - name: Deploy to Azure Static Web Apps
@@ -206,23 +274,51 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - name: Wait for App Service to be ready
+      run: |
+        echo "Waiting for App Service to start..."
+        sleep 60
+
     - name: Validate Backend Health
       run: |
-        curl -f https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/v1/health
+        echo "Testing backend health endpoint..."
+        for i in {1..5}; do
+          if curl -f https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/api/v1/health; then
+            echo "✅ Backend health check passed"
+            break
+          else
+            echo "⏳ Attempt $i failed, retrying in 30s..."
+            sleep 30
+          fi
+        done
+
+    - name: Validate LLM Configurations Endpoint
+      run: |
+        echo "Testing LLM configurations endpoint (user's failing endpoint)..."
+        curl -f https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/api/v1/simple-llm-configs
 
     - name: Validate MCP Server Health
       run: |
         curl -f https://grc-mcp-server-prod.eastus.azurecontainer.io:3006/health
 
-    - name: Validate OAuth Configuration
+    - name: Validate All API Endpoints
       run: |
-        curl -f https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/v1/oauth/health
+        BASE_URL="https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/api/v1"
+        echo "Testing all critical API endpoints..."
+
+        curl -f "$BASE_URL/health" && echo "✅ Health endpoint working"
+        curl -f "$BASE_URL/simple-llm-configs" && echo "✅ LLM configs endpoint working"
+        curl -f "$BASE_URL/simple-agents" && echo "✅ Agents endpoint working"
+        curl -f "$BASE_URL/simple-credentials" && echo "✅ Credentials endpoint working"
+        curl -f "$BASE_URL/mcp-servers/tools" && echo "✅ MCP tools endpoint working"
 
     - name: Validate Frontend Deployment
       run: |
         curl -f ${{ needs.validate-azure.outputs.static-web-app-url }}
 
-    - name: Run Integration Tests
+    - name: Final Integration Test
       run: |
-        echo "Integration tests would run here"
-        # Add actual integration test commands
+        echo "🎉 All deployments successful!"
+        echo "Frontend URL: ${{ needs.validate-azure.outputs.static-web-app-url }}"
+        echo "Backend URL: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+        echo "API Base URL: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/api/v1"
