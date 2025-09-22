@@ -43,21 +43,70 @@ jobs:
         echo "Checking parent directory:"
         ls -la ../ | grep infrastructure || echo "Not found in parent directory"
 
+    - name: Create Terraform Variables
+      run: |
+        cd ../infrastructure/terraform
+        cat > terraform.tfvars << 'EOF'
+        project_name = "grc-ai-platform"
+        environment  = "production"
+        location     = "East US"
+
+        vnet_address_space = ["10.0.0.0/16"]
+
+        allowed_ip_ranges = [
+          "0.0.0.0/0"
+        ]
+
+        allowed_cors_origins = [
+          "https://*.azurestaticapps.net",
+          "https://localhost:3000"
+        ]
+
+        container_registry_url = "acrgrcplatformprod.azurecr.io"
+        mcp_server_image_tag   = "latest"
+
+        apim_publisher_email = "admin@grcplatform.com"
+        apim_publisher_name  = "GRC Platform Team"
+
+        alert_email_receivers = [
+          {
+            name  = "Platform Team"
+            email = "alerts@grcplatform.com"
+          }
+        ]
+
+        common_tags = {
+          Project        = "GRC-AI-Platform"
+          Environment    = "Production"
+          ManagedBy      = "Terraform"
+          CostCenter     = "Platform"
+        }
+
+        tenant_configurations = {}
+
+        enable_autoscaling = true
+        enable_private_endpoints = true
+        enable_firewall = true
+        enable_ddos_protection = true
+        geo_redundant_backup = true
+        enable_diagnostic_settings = true
+        EOF
+
     - name: Terraform Init
       run: |
-        cd ../infrastructure
+        cd ../infrastructure/terraform
         terraform init
 
     - name: Terraform Plan
       run: |
-        cd ../infrastructure
+        cd ../infrastructure/terraform
         terraform plan -var-file="terraform.tfvars"
 
     - name: Terraform Apply
       if: github.ref == 'refs/heads/master'
       id: terraform
       run: |
-        cd ../infrastructure
+        cd ../infrastructure/terraform
         terraform apply -auto-approve -var-file="terraform.tfvars"
         echo "function_app_name=$(terraform output -raw function_app_name)" >> $GITHUB_OUTPUT
         echo "static_web_app_url=$(terraform output -raw static_web_app_url)" >> $GITHUB_OUTPUT
