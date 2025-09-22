@@ -65,9 +65,8 @@ jobs:
       with:
         node-version: ${{ env.NODE_VERSION }}
 
-    - name: Install dependencies
+    - name: Install monorepo dependencies
       run: |
-        cd packages/backend
         npm ci
 
     - name: Build backend
@@ -106,6 +105,15 @@ jobs:
         login-server: ${{ env.CONTAINER_REGISTRY }}
         username: ${{ secrets.ACR_USERNAME }}
         password: ${{ secrets.ACR_PASSWORD }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Install monorepo dependencies
+      run: |
+        npm ci
 
     - name: Build MCP Server Docker image
       run: |
@@ -150,9 +158,8 @@ jobs:
       with:
         node-version: ${{ env.NODE_VERSION }}
 
-    - name: Install frontend dependencies
+    - name: Install monorepo dependencies
       run: |
-        cd packages/frontend
         npm ci
 
     - name: Build frontend
