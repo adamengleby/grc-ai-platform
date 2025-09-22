@@ -34,6 +34,13 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+    - name: Debug repository structure
+      run: |
+        echo "Repository root contents:"
+        ls -la
+        echo "Looking for infrastructure directory:"
+        find . -name "infrastructure" -type d
+
     - name: Terraform Init
       run: |
         cd infrastructure
