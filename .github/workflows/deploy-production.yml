@@ -158,13 +158,16 @@ jobs:
       with:
         node-version: ${{ env.NODE_VERSION }}
 
-    - name: Install root dependencies
+    - name: Clear npm cache and install dependencies
       run: |
+        npm cache clean --force
+        rm -rf node_modules package-lock.json
         npm install
 
     - name: Build frontend with environment variables
       run: |
         cd packages/frontend
+        rm -rf node_modules/.vite
         npm run build
       env:
         VITE_API_BASE_URL: https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/v1
