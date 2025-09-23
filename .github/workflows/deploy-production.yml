@@ -70,32 +70,33 @@ jobs:
       run: |
         npm install
 
-    - name: Build backend
+    - name: Prepare minimal backend deployment
       run: |
-        cd packages/backend
-        npm run build
+        # Create deployment directory for minimal backend
+        mkdir -p backend-deploy
 
-    - name: Create deployment package
-      run: |
-        cd packages/backend
-        # Create a clean deployment directory
-        mkdir -p deploy
+        # Copy the zero-dependency minimal backend
+        cp minimal-backend.cjs backend-deploy/
 
-        # Copy built application
-        cp -r dist/ deploy/
-
-        # Copy package.json and install production dependencies
-        cp package.json deploy/
-        cd deploy
-        npm install --production --omit=dev
-
-        # Copy other necessary files
-        cd ..
-        cp -r node_modules deploy/ || true
+        # Create a minimal package.json for App Service
+        cat > backend-deploy/package.json << 'EOF'
+        {
+          "name": "grc-minimal-backend",
+          "version": "1.0.0",
+          "description": "Zero-dependency GRC Platform Backend",
+          "main": "minimal-backend.cjs",
+          "scripts": {
+            "start": "node minimal-backend.cjs"
+          },
+          "engines": {
+            "node": ">=18.0.0"
+          }
+        }
+        EOF
 
         # Create deployment zip
-        cd deploy
-        zip -r ../backend-deployment.zip . -x "*.git*" "node_modules/.cache/*"
+        cd backend-deploy
+        zip -r ../backend-deployment.zip . -x "*.git*"
 
     - name: Azure Login
       uses: azure/login@v1
@@ -132,7 +133,7 @@ jobs:
       uses: azure/webapps-deploy@v2
       with:
         app-name: grc-backend-prod
-        package: packages/backend/backend-deployment.zip
+        package: backend-deployment.zip
 
     - name: Configure Azure App Service Environment
       run: |
@@ -154,7 +155,7 @@ jobs:
         az webapp config set \
           --name grc-backend-prod \
           --resource-group rg-grc-ai-platform-prod \
-          --startup-file "node dist/index.js"
+          --startup-file "node minimal-backend.cjs"
 
     - name: Enable App Service Logs
       run: |
