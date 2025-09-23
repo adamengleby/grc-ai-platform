@@ -51,14 +51,19 @@ All components are now deployed and running in Azure. Local development servers 
 
 ### **Development Workflow**
 
-#### **No Local Servers Needed**
-All development can now be done against Azure production:
+#### **✅ No Local Servers Running**
+All local development services have been stopped. Development is now 100% Azure-based:
+
+**Production Environment Only:**
+- **Frontend**: https://delightful-stone-0dfb8790f.2.azurestaticapps.net
+- **Backend**: https://func-grc-backend-full.azurewebsites.net/api/v1
+
 ```bash
-# Frontend development (if needed)
+# For local frontend development (optional)
 cd packages/frontend
 VITE_API_BASE_URL=https://func-grc-backend-full.azurewebsites.net/api/v1 npm run dev
 
-# Or work directly with production frontend
+# But recommended: Use production frontend directly
 # https://delightful-stone-0dfb8790f.2.azurestaticapps.net
 ```
 
@@ -100,4 +105,4 @@ VITE_API_BASE_URL=https://func-grc-backend-full.azurewebsites.net/api/v1 npm run
 
 ---
 
-**Status**: 🎉 **PRODUCTION READY** - All services running in Azure, GitHub up to date, ready for continued development.
+**Status**: 🎉 **AZURE-ONLY DEVELOPMENT** - All local services stopped, all development now uses Azure production environment, GitHub up to date.
