@@ -180,14 +180,82 @@ app.get('/api/v1/database/deploy', async (req, res) => {
   }
 });
 
-// API Routes
-app.get('/api/v1/simple-agents', async (req, res) => {
+// Tenant Management APIs
+app.get('/api/v1/tenants', async (req, res) => {
   try {
+    const db = getDatabase();
+    const result = await db.query(`
+      SELECT id, name, display_name, domain, subscription_plan,
+             is_active, created_at, updated_at
+      FROM tenants
+      ORDER BY created_at DESC
+    `);
+
     res.json({
       success: true,
       data: {
-        agents: [],
-        total: 0,
+        tenants: result.rows,
+        total: result.rows.length
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get('/api/v1/tenants/:id', async (req, res) => {
+  try {
+    const db = getDatabase();
+    const result = await db.query(`
+      SELECT id, name, display_name, domain, subscription_plan,
+             is_active, created_at, updated_at
+      FROM tenants WHERE id = $1
+    `, [req.params.id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Tenant not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: result.rows[0]
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// AI Agents API - Database-backed
+app.get('/api/v1/simple-agents', async (req, res) => {
+  try {
+    const db = getDatabase();
+    const result = await db.query(`
+      SELECT a.id, a.name, a.description, a.persona, a.system_prompt,
+             a.avatar, a.color, a.is_enabled, a.usage_count,
+             a.created_at, a.updated_at,
+             t.name as tenant_name,
+             l.name as llm_config_name, l.provider, l.model
+      FROM ai_agents a
+      LEFT JOIN tenants t ON a.tenant_id = t.id
+      LEFT JOIN llm_configs l ON a.llm_config_id = l.id
+      WHERE a.is_enabled = true
+      ORDER BY a.created_at DESC
+    `);
+
+    res.json({
+      success: true,
+      data: {
+        agents: result.rows,
+        total: result.rows.length,
         database: 'PostgreSQL integration active'
       }
     });
@@ -199,19 +267,310 @@ app.get('/api/v1/simple-agents', async (req, res) => {
   }
 });
 
+app.post('/api/v1/simple-agents', async (req, res) => {
+  try {
+    const db = getDatabase();
+    const {
+      tenant_id = '00000000-0000-0000-0000-000000000001', // Default to demo tenant
+      created_by = '00000000-0000-0000-0000-000000000002', // Default to admin user
+      name,
+      description,
+      persona,
+      system_prompt,
+      llm_config_id,
+      avatar = '🤖',
+      color = '#3B82F6'
+    } = req.body;
+
+    if (!name || !system_prompt) {
+      return res.status(400).json({
+        success: false,
+        error: 'Name and system_prompt are required'
+      });
+    }
+
+    const result = await db.query(`
+      INSERT INTO ai_agents (tenant_id, created_by, name, description, persona,
+                           system_prompt, llm_config_id, avatar, color)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING *
+    `, [tenant_id, created_by, name, description, persona, system_prompt,
+        llm_config_id, avatar, color]);
+
+    res.status(201).json({
+      success: true,
+      data: result.rows[0]
+    });
+  } catch (error) {
+    if (error.code === '23505') { // Unique constraint violation
+      res.status(409).json({
+        success: false,
+        error: 'Agent with this name already exists for this tenant'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  }
+});
+
+// LLM Configuration APIs
 app.get('/api/v1/simple-llm-configs', async (req, res) => {
   try {
+    const db = getDatabase();
+    const result = await db.query(`
+      SELECT l.id, l.name, l.provider, l.model, l.api_endpoint,
+             l.max_tokens, l.temperature, l.is_enabled, l.is_default,
+             l.created_at, l.updated_at,
+             t.name as tenant_name, t.display_name as tenant_display_name,
+             u.full_name as created_by_name
+      FROM llm_configs l
+      LEFT JOIN tenants t ON l.tenant_id = t.id
+      LEFT JOIN users u ON l.created_by = u.id
+      WHERE l.is_enabled = true
+      ORDER BY l.is_default DESC, l.created_at DESC
+    `);
+
+    // Map to frontend expected format
+    const llm_configs = result.rows.map(row => ({
+      config_id: row.id,
+      id: row.id,
+      name: row.name,
+      provider: row.provider,
+      model: row.model,
+      api_endpoint: row.api_endpoint,
+      max_tokens: row.max_tokens,
+      temperature: row.temperature,
+      is_default: row.is_default,
+      tenant_name: row.tenant_name,
+      created_by: row.created_by_name
+    }));
+
     res.json({
       success: true,
       data: {
-        llm_configs: [{
-          config_id: '1',
-          id: '1',
-          name: 'Azure PostgreSQL Ready',
-          provider: 'azure',
-          model: 'database-integrated'
-        }]
+        llm_configs: llm_configs,
+        total: llm_configs.length
       }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.post('/api/v1/simple-llm-configs', async (req, res) => {
+  try {
+    const db = getDatabase();
+    const {
+      tenant_id = '00000000-0000-0000-0000-000000000001',
+      created_by = '00000000-0000-0000-0000-000000000002',
+      name,
+      provider,
+      model,
+      api_endpoint,
+      api_key_vault_reference,
+      max_tokens = 4000,
+      temperature = 0.7,
+      is_default = false
+    } = req.body;
+
+    if (!name || !provider || !model) {
+      return res.status(400).json({
+        success: false,
+        error: 'Name, provider, and model are required'
+      });
+    }
+
+    // If this is being set as default, unset other defaults for this tenant
+    if (is_default) {
+      await db.query(`
+        UPDATE llm_configs
+        SET is_default = false
+        WHERE tenant_id = $1
+      `, [tenant_id]);
+    }
+
+    const result = await db.query(`
+      INSERT INTO llm_configs (tenant_id, created_by, name, provider, model,
+                              api_endpoint, api_key_vault_reference, max_tokens,
+                              temperature, is_default)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING *
+    `, [tenant_id, created_by, name, provider, model, api_endpoint,
+        api_key_vault_reference, max_tokens, temperature, is_default]);
+
+    res.status(201).json({
+      success: true,
+      data: result.rows[0]
+    });
+  } catch (error) {
+    if (error.code === '23505') { // Unique constraint violation
+      res.status(409).json({
+        success: false,
+        error: 'LLM configuration with this name already exists for this tenant'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  }
+});
+
+// Users API
+app.get('/api/v1/users', async (req, res) => {
+  try {
+    const db = getDatabase();
+    const result = await db.query(`
+      SELECT u.id, u.email, u.full_name, u.role, u.is_active,
+             u.last_login, u.created_at, u.updated_at,
+             t.name as tenant_name, t.display_name as tenant_display_name
+      FROM users u
+      LEFT JOIN tenants t ON u.tenant_id = t.id
+      WHERE u.is_active = true
+      ORDER BY u.created_at DESC
+    `);
+
+    res.json({
+      success: true,
+      data: {
+        users: result.rows,
+        total: result.rows.length
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Analytics/Dashboard API
+app.get('/api/v1/dashboard/stats', async (req, res) => {
+  try {
+    const db = getDatabase();
+
+    // Get counts from each table
+    const [tenantResult, userResult, agentResult, llmResult] = await Promise.all([
+      db.query('SELECT COUNT(*) as count FROM tenants WHERE is_active = true'),
+      db.query('SELECT COUNT(*) as count FROM users WHERE is_active = true'),
+      db.query('SELECT COUNT(*) as count FROM ai_agents WHERE is_enabled = true'),
+      db.query('SELECT COUNT(*) as count FROM llm_configs WHERE is_enabled = true')
+    ]);
+
+    // Get recent activity
+    const recentActivity = await db.query(`
+      SELECT 'agent' as type, name, created_at, updated_at
+      FROM ai_agents
+      WHERE created_at > NOW() - INTERVAL '7 days'
+      UNION ALL
+      SELECT 'llm_config' as type, name, created_at, updated_at
+      FROM llm_configs
+      WHERE created_at > NOW() - INTERVAL '7 days'
+      ORDER BY created_at DESC
+      LIMIT 10
+    `);
+
+    res.json({
+      success: true,
+      data: {
+        stats: {
+          active_tenants: parseInt(tenantResult.rows[0].count),
+          active_users: parseInt(userResult.rows[0].count),
+          active_agents: parseInt(agentResult.rows[0].count),
+          active_llm_configs: parseInt(llmResult.rows[0].count)
+        },
+        recent_activity: recentActivity.rows,
+        generated_at: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Agent Update endpoint
+app.put('/api/v1/simple-agents/:id', async (req, res) => {
+  try {
+    const db = getDatabase();
+    const { id } = req.params;
+    const {
+      name,
+      description,
+      persona,
+      system_prompt,
+      llm_config_id,
+      avatar,
+      color,
+      is_enabled
+    } = req.body;
+
+    const result = await db.query(`
+      UPDATE ai_agents
+      SET name = COALESCE($1, name),
+          description = COALESCE($2, description),
+          persona = COALESCE($3, persona),
+          system_prompt = COALESCE($4, system_prompt),
+          llm_config_id = COALESCE($5, llm_config_id),
+          avatar = COALESCE($6, avatar),
+          color = COALESCE($7, color),
+          is_enabled = COALESCE($8, is_enabled),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $9
+      RETURNING *
+    `, [name, description, persona, system_prompt, llm_config_id,
+        avatar, color, is_enabled, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Agent not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: result.rows[0]
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Delete agent endpoint
+app.delete('/api/v1/simple-agents/:id', async (req, res) => {
+  try {
+    const db = getDatabase();
+    const { id } = req.params;
+
+    const result = await db.query(`
+      DELETE FROM ai_agents WHERE id = $1 RETURNING *
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Agent not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Agent deleted successfully',
+      data: result.rows[0]
     });
   } catch (error) {
     res.status(500).json({
