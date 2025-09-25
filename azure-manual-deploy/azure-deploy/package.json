@@ -1,7 +1,0 @@
-{
-  "name": "grc-backend-prod",
-  "version": "1.0.0",
-  "main": "minimal-backend.cjs",
-  "scripts": {"start": "node minimal-backend.cjs"},
-  "engines": {"node": ">=18.0.0"}
-}
