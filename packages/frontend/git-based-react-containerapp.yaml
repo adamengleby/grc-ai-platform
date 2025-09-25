@@ -1,0 +1,246 @@
+properties:
+  template:
+    containers:
+    - image: mcr.microsoft.com/azure-functions/node:4-node20-appservice
+      name: grc-frontend-git
+      env:
+      - name: NODE_ENV
+        value: production
+      - name: PORT
+        value: "8080"
+      - name: VITE_API_BASE_URL
+        value: "https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1"
+      - name: GIT_REPO_URL
+        value: "https://github.com/adamengleby/grc-ai-platform.git"
+      command: ["/bin/sh"]
+      args: ["-c", "
+        echo '🚀 GRC AI Platform - Git-based React Deployment' &&
+
+        # Install git and build tools
+        apt-get update && apt-get install -y git curl &&
+
+        # Install Node.js 20 and npm (if not already available)
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash - &&
+        apt-get install -y nodejs &&
+
+        # Verify Node.js version
+        echo '📦 Node.js version:' && node --version &&
+        echo '📦 NPM version:' && npm --version &&
+
+        # Clone the repository
+        echo '📥 Cloning repository...' &&
+        git clone https://github.com/adamengleby/grc-ai-platform.git /app &&
+        cd /app &&
+
+        # Navigate to frontend package
+        cd packages/frontend &&
+
+        echo '📦 Installing frontend dependencies...' &&
+        npm install &&
+
+        # Set environment variable for build
+        export VITE_API_BASE_URL='https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1' &&
+
+        echo '🏗️  Building React application...' &&
+        npm run build &&
+
+        echo '📁 Build completed. Dist contents:' &&
+        ls -la dist/ &&
+        ls -la dist/assets/ &&
+
+        # Install production server dependencies
+        cat > package.json << 'PACKAGE_EOF'
+{
+  \"name\": \"grc-frontend-production\",
+  \"version\": \"1.0.0\",
+  \"main\": \"server.js\",
+  \"dependencies\": {
+    \"express\": \"^4.19.2\",
+    \"compression\": \"^1.7.4\",
+    \"helmet\": \"^7.1.0\"
+  },
+  \"scripts\": {
+    \"start\": \"node server.js\"
+  }
+}
+PACKAGE_EOF
+
+        npm install --production &&
+
+        # Create production server
+        cat > server.js << 'SERVER_EOF'
+const express = require('express');
+const path = require('path');
+const compression = require('compression');
+const helmet = require('helmet');
+
+const app = express();
+
+// Security middleware with React compatibility
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: [\"'self'\"],
+      scriptSrc: [\"'self'\", \"'unsafe-inline'\", \"'unsafe-eval'\"],
+      styleSrc: [\"'self'\", \"'unsafe-inline'\"],
+      imgSrc: [\"'self'\", 'data:', 'https:'],
+      connectSrc: [\"'self'\", 'https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io'],
+      fontSrc: [\"'self'\", 'data:'],
+      objectSrc: [\"'none'\"],
+      mediaSrc: [\"'self'\"],
+      frameSrc: [\"'none'\"],
+    },
+  },
+  crossOriginEmbedderPolicy: false
+}));
+
+// Compression middleware
+app.use(compression());
+
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
+// Serve static files from the built React app
+app.use(express.static(path.join(__dirname, 'dist'), {
+  maxAge: '1d',
+  setHeaders: (res, filepath) => {
+    // Set proper MIME types
+    if (filepath.endsWith('.js') || filepath.endsWith('.mjs')) {
+      res.setHeader('Content-Type', 'application/javascript');
+    }
+    if (filepath.endsWith('.css')) {
+      res.setHeader('Content-Type', 'text/css');
+    }
+    if (filepath.endsWith('.json')) {
+      res.setHeader('Content-Type', 'application/json');
+    }
+    if (filepath.endsWith('.svg')) {
+      res.setHeader('Content-Type', 'image/svg+xml');
+    }
+    if (filepath.endsWith('.woff') || filepath.endsWith('.woff2')) {
+      res.setHeader('Content-Type', 'font/woff2');
+    }
+
+    // Cache strategy
+    if (filepath.includes('/assets/')) {
+      // Long cache for assets (they have hashes in filenames)
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    } else if (filepath.endsWith('.html')) {
+      // No cache for HTML files
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    } else {
+      // Short cache for other files
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+    }
+  }
+}));
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  const distPath = path.join(__dirname, 'dist');
+  const indexPath = path.join(distPath, 'index.html');
+  const fs = require('fs');
+
+  const healthStatus = {
+    status: 'healthy',
+    service: 'GRC AI Platform - React Frontend',
+    timestamp: new Date().toISOString(),
+    environment: 'Azure Container Apps - Australia Southeast',
+    version: '1.0.0',
+    distExists: fs.existsSync(distPath),
+    indexExists: fs.existsSync(indexPath),
+    backendUrl: process.env.VITE_API_BASE_URL || 'Not configured'
+  };
+
+  // Add asset information
+  try {
+    const assetsPath = path.join(distPath, 'assets');
+    if (fs.existsSync(assetsPath)) {
+      const assets = fs.readdirSync(assetsPath);
+      healthStatus.assetsCount = assets.length;
+      healthStatus.hasJS = assets.some(file => file.endsWith('.js'));
+      healthStatus.hasCSS = assets.some(file => file.endsWith('.css'));
+    }
+  } catch (error) {
+    healthStatus.assetError = error.message;
+  }
+
+  res.json(healthStatus);
+});
+
+// API configuration endpoint
+app.get('/api-config', (req, res) => {
+  res.json({
+    backendUrl: process.env.VITE_API_BASE_URL || 'Not configured',
+    environment: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString(),
+    region: 'Australia Southeast'
+  });
+});
+
+// Handle React Router - send all non-asset requests to index.html
+app.get('*', (req, res) => {
+  // Don't serve index.html for API-like requests or asset files
+  if (req.path.startsWith('/api') || req.path.includes('.')) {
+    return res.status(404).json({ error: 'Not Found' });
+  }
+
+  const indexPath = path.join(__dirname, 'dist', 'index.html');
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      console.error('Error serving index.html:', err);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
+});
+
+// Error handling middleware
+app.use((error, req, res, next) => {
+  console.error('Server error:', error);
+  res.status(500).json({
+    error: 'Internal Server Error',
+    timestamp: new Date().toISOString()
+  });
+});
+
+const port = process.env.PORT || 8080;
+app.listen(port, () => {
+  console.log('');
+  console.log('🚀 GRC AI Platform Frontend - PRODUCTION READY');
+  console.log('='.repeat(50));
+  console.log('📍 Port: ' + port);
+  console.log('📁 Serving from: ' + path.join(__dirname, 'dist'));
+  console.log('🔗 Backend API: ' + (process.env.VITE_API_BASE_URL || 'Not configured'));
+  console.log('🌏 Region: Australia Southeast');
+  console.log('⚡ Environment: ' + (process.env.NODE_ENV || 'development'));
+  console.log('='.repeat(50));
+  console.log('✅ React application ready for production use');
+  console.log('');
+});
+SERVER_EOF
+
+        echo '✅ Production server created' &&
+        echo '🚀 Starting React frontend...' &&
+        echo '' &&
+        echo '📁 Final directory structure:' &&
+        ls -la &&
+        echo '' &&
+        echo '📦 Starting production server...' &&
+        node server.js
+        "]
+      resources:
+        cpu: 1.0
+        memory: 2Gi
+    scale:
+      minReplicas: 1
+      maxReplicas: 5
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080
+      allowInsecure: false

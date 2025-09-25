@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GRC Platform Frontend Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+        .success { background-color: #d4edda; }
+        .error { background-color: #f8d7da; }
+        pre { background-color: #f8f9fa; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>GRC Platform Frontend API Test</h1>
+
+    <div class="test-section">
+        <h2>Environment Detection</h2>
+        <div id="env-info"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Backend API Health Check</h2>
+        <button onclick="testHealth()">Test /api/v1/health</button>
+        <div id="health-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>LLM Configurations (User's Failing Endpoint)</h2>
+        <button onclick="testLLMConfigs()">Test /api/v1/simple-llm-configs</button>
+        <div id="llm-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Other API Endpoints</h2>
+        <button onclick="testAllEndpoints()">Test All Endpoints</button>
+        <div id="all-results"></div>
+    </div>
+
+    <script>
+        // Environment detection (similar to frontend utils)
+        function getBackendApiUrl() {
+            const isDev = window.location.hostname === 'localhost';
+            const isAzureStaticWebApps = window.location.hostname.includes('azurestaticapps.net');
+
+            console.log('🔍 Environment Detection:', {
+                isDev,
+                hostname: window.location.hostname,
+                isAzureStaticWebApps
+            });
+
+            // Force external API calls for Azure Static Web Apps
+            if (isAzureStaticWebApps) {
+                const externalUrl = 'https://grc-backend-prod.azurewebsites.net/api/v1';
+                console.log('📍 Azure Static Web Apps detected - using external API:', externalUrl);
+                return externalUrl;
+            }
+
+            if (isDev) {
+                return 'http://localhost:3005/api/v1';
+            }
+
+            return 'https://grc-backend-prod.azurewebsites.net/api/v1';
+        }
+
+        function updateEnvInfo() {
+            const apiUrl = getBackendApiUrl();
+            document.getElementById('env-info').innerHTML = `
+                <strong>Detected API URL:</strong> ${apiUrl}<br>
+                <strong>Current Hostname:</strong> ${window.location.hostname}<br>
+                <strong>Full URL:</strong> ${window.location.href}
+            `;
+        }
+
+        async function makeApiCall(endpoint, method = 'GET') {
+            const apiUrl = getBackendApiUrl();
+            const fullUrl = `${apiUrl}${endpoint}`;
+
+            console.log(`Making API call: ${method} ${fullUrl}`);
+
+            try {
+                const response = await fetch(fullUrl, {
+                    method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+
+                const responseText = await response.text();
+                let responseData;
+
+                try {
+                    responseData = JSON.parse(responseText);
+                } catch {
+                    responseData = responseText;
+                }
+
+                return {
+                    success: response.ok,
+                    status: response.status,
+                    data: responseData,
+                    url: fullUrl
+                };
+            } catch (error) {
+                return {
+                    success: false,
+                    error: error.message,
+                    url: fullUrl
+                };
+            }
+        }
+
+        async function testHealth() {
+            const result = await makeApiCall('/health');
+            const resultDiv = document.getElementById('health-result');
+
+            if (result.success) {
+                resultDiv.className = 'success';
+                resultDiv.innerHTML = `
+                    <h3>✅ Health Check Successful</h3>
+                    <pre>${JSON.stringify(result.data, null, 2)}</pre>
+                `;
+            } else {
+                resultDiv.className = 'error';
+                resultDiv.innerHTML = `
+                    <h3>❌ Health Check Failed</h3>
+                    <strong>Status:</strong> ${result.status || 'Network Error'}<br>
+                    <strong>URL:</strong> ${result.url}<br>
+                    <strong>Error:</strong> ${result.error || 'Unknown error'}<br>
+                    <pre>${JSON.stringify(result.data, null, 2)}</pre>
+                `;
+            }
+        }
+
+        async function testLLMConfigs() {
+            const result = await makeApiCall('/simple-llm-configs');
+            const resultDiv = document.getElementById('llm-result');
+
+            if (result.success) {
+                resultDiv.className = 'success';
+                resultDiv.innerHTML = `
+                    <h3>✅ LLM Configs Loaded Successfully</h3>
+                    <strong>Found ${result.data.data ? result.data.data.length : 0} configurations</strong>
+                    <pre>${JSON.stringify(result.data, null, 2)}</pre>
+                `;
+            } else {
+                resultDiv.className = 'error';
+                resultDiv.innerHTML = `
+                    <h3>❌ LLM Configs Failed (This was the user's error)</h3>
+                    <strong>Status:</strong> ${result.status || 'Network Error'}<br>
+                    <strong>URL:</strong> ${result.url}<br>
+                    <strong>Error:</strong> ${result.error || 'Unknown error'}<br>
+                    <pre>${JSON.stringify(result.data, null, 2)}</pre>
+                `;
+            }
+        }
+
+        async function testAllEndpoints() {
+            const endpoints = [
+                '/health',
+                '/simple-llm-configs',
+                '/simple-agents',
+                '/simple-credentials',
+                '/simple-mcp-configs',
+                '/mcp-servers/tools'
+            ];
+
+            const resultDiv = document.getElementById('all-results');
+            resultDiv.innerHTML = '<h3>Testing all endpoints...</h3>';
+
+            for (const endpoint of endpoints) {
+                const result = await makeApiCall(endpoint);
+                const status = result.success ? '✅' : '❌';
+                const statusCode = result.status || 'ERROR';
+
+                resultDiv.innerHTML += `
+                    <div style="margin: 10px 0; padding: 10px; border-left: 4px solid ${result.success ? 'green' : 'red'};">
+                        <strong>${status} ${endpoint}</strong> - Status: ${statusCode}<br>
+                        <small>URL: ${result.url}</small>
+                    </div>
+                `;
+            }
+        }
+
+        // Initialize
+        updateEnvInfo();
+
+        // Auto-test on page load
+        setTimeout(() => {
+            console.log('Auto-testing health endpoint...');
+            testHealth();
+        }, 1000);
+    </script>
+</body>
+</html>

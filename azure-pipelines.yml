@@ -1,0 +1,245 @@
+# Azure DevOps Pipeline for GRC AI Platform
+# Multi-Tenant SaaS Platform with Enterprise Security
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+      - release/*
+  paths:
+    exclude:
+      - docs/**
+      - README.md
+      - CHANGELOG.md
+      - deprecated-files/**
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    exclude:
+      - docs/**
+      - README.md
+      - CHANGELOG.md
+      - deprecated-files/**
+
+variables:
+  # Build configuration
+  buildConfiguration: 'Release'
+  nodeVersion: '18.x'
+  
+  # Azure configuration
+  azureSubscription: 'grc-ai-platform-service-connection'
+  resourceGroupName: 'rg-grc-ai-platform-$(environment)'
+  
+  # Security and compliance
+  enableSecurityScan: true
+  enableDependencyCheck: true
+  enableCodeCoverage: true
+  
+  # Multi-tenant configuration
+  enableTenantIsolationTests: true
+  enableComplianceValidation: true
+
+stages:
+  - stage: 'Validate'
+    displayName: 'Code Quality & Security Validation'
+    jobs:
+      - job: 'CodeQuality'
+        displayName: 'Code Quality Analysis'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - template: .azure/pipelines/templates/setup-node.yml
+          
+          - script: |
+              npm run lint
+            displayName: 'Run ESLint'
+            continueOnError: false
+          
+          - script: |
+              npm run type-check
+            displayName: 'TypeScript Type Checking'
+            continueOnError: false
+          
+          - script: |
+              npx prettier --check .
+            displayName: 'Code Formatting Check'
+            continueOnError: false
+
+      - job: 'SecurityScan'
+        displayName: 'Security Vulnerability Scanning'
+        pool:
+          vmImage: 'ubuntu-latest'
+        condition: eq(variables.enableSecurityScan, true)
+        steps:
+          - template: .azure/pipelines/templates/setup-node.yml
+          
+          - script: |
+              npm audit --audit-level moderate
+            displayName: 'NPM Security Audit'
+            continueOnError: false
+          
+          - task: WhiteSource@21
+            displayName: 'WhiteSource Dependency Check'
+            condition: eq(variables.enableDependencyCheck, true)
+            inputs:
+              cwd: '$(System.DefaultWorkingDirectory)'
+              projectName: 'GRC-AI-Platform'
+
+  - stage: 'Build'
+    displayName: 'Build and Test'
+    dependsOn: 'Validate'
+    jobs:
+      - job: 'BuildPackages'
+        displayName: 'Build All Packages'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - template: .azure/pipelines/templates/setup-node.yml
+          
+          - script: |
+              npm run build
+            displayName: 'Build All Packages'
+          
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Build Artifacts'
+            inputs:
+              pathToPublish: '$(System.DefaultWorkingDirectory)/dist'
+              artifactName: 'build-artifacts'
+
+      - job: 'RunTests'
+        displayName: 'Run Unit and Integration Tests'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - template: .azure/pipelines/templates/setup-node.yml
+          
+          - script: |
+              npm run test:coverage
+            displayName: 'Run Tests with Coverage'
+            condition: eq(variables.enableCodeCoverage, true)
+          
+          - script: |
+              npm run test
+            displayName: 'Run Tests'
+            condition: ne(variables.enableCodeCoverage, true)
+          
+          - task: PublishTestResults@2
+            displayName: 'Publish Test Results'
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: '**/test-results.xml'
+              mergeTestResults: true
+          
+          - task: PublishCodeCoverageResults@1
+            displayName: 'Publish Code Coverage'
+            condition: eq(variables.enableCodeCoverage, true)
+            inputs:
+              codeCoverageTool: 'Cobertura'
+              summaryFileLocation: '**/coverage/cobertura-coverage.xml'
+
+      - job: 'MultiTenantTests'
+        displayName: 'Multi-Tenant Isolation Tests'
+        pool:
+          vmImage: 'ubuntu-latest'
+        condition: eq(variables.enableTenantIsolationTests, true)
+        steps:
+          - template: .azure/pipelines/templates/setup-node.yml
+          
+          - script: |
+              npm run test:multi-tenant
+            displayName: 'Run Multi-Tenant Isolation Tests'
+          
+          - script: |
+              npm run test:security
+            displayName: 'Run Security Tests'
+
+  - stage: 'Deploy_Development'
+    displayName: 'Deploy to Development'
+    dependsOn: 'Build'
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+    variables:
+      environment: 'dev'
+    jobs:
+      - template: .azure/pipelines/templates/deploy-infrastructure.yml
+        parameters:
+          environment: 'dev'
+          azureSubscription: $(azureSubscription)
+          resourceGroupName: $(resourceGroupName)
+
+  - stage: 'Deploy_Staging'
+    displayName: 'Deploy to Staging'
+    dependsOn: 'Build'
+    condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/heads/release/'))
+    variables:
+      environment: 'staging'
+    jobs:
+      - template: .azure/pipelines/templates/deploy-infrastructure.yml
+        parameters:
+          environment: 'staging'
+          azureSubscription: $(azureSubscription)
+          resourceGroupName: $(resourceGroupName)
+
+  - stage: 'Deploy_Production'
+    displayName: 'Deploy to Production'
+    dependsOn: 'Build'
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    variables:
+      environment: 'prod'
+    jobs:
+      - deployment: 'DeployProduction'
+        displayName: 'Deploy to Production'
+        environment: 'production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: .azure/pipelines/templates/deploy-infrastructure.yml
+                  parameters:
+                    environment: 'prod'
+                    azureSubscription: $(azureSubscription)
+                    resourceGroupName: $(resourceGroupName)
+                    enableComplianceValidation: $(enableComplianceValidation)
+
+  - stage: 'PostDeployment'
+    displayName: 'Post-Deployment Validation'
+    dependsOn: 
+      - 'Deploy_Development'
+      - 'Deploy_Staging'
+      - 'Deploy_Production'
+    condition: succeeded()
+    jobs:
+      - job: 'HealthChecks'
+        displayName: 'Application Health Checks'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - script: |
+              # Add health check scripts for deployed services
+              echo "Running health checks for deployed services"
+            displayName: 'Service Health Checks'
+          
+          - script: |
+              # Add MCP server connectivity tests
+              echo "Testing MCP server connectivity"
+            displayName: 'MCP Connectivity Tests'
+
+      - job: 'ComplianceValidation'
+        displayName: 'Compliance and Audit Validation'
+        pool:
+          vmImage: 'ubuntu-latest'
+        condition: eq(variables.enableComplianceValidation, true)
+        steps:
+          - script: |
+              # Add compliance validation scripts
+              echo "Running compliance validation checks"
+            displayName: 'Compliance Checks'
+          
+          - script: |
+              # Add audit trail validation
+              echo "Validating audit trail functionality"
+            displayName: 'Audit Trail Validation'

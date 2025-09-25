@@ -1,0 +1,122 @@
+name: Simple Azure Deploy
+
+on:
+  workflow_dispatch:
+
+env:
+  RESOURCE_GROUP: rg-grc-ai-platform-prod
+  APP_NAME: grc-backend-prod
+  LOCATION: eastus
+
+jobs:
+  deploy-step-by-step:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Step 1 - Create Resource Group
+      run: |
+        echo "Creating resource group..."
+        az group create --name ${{ env.RESOURCE_GROUP }} --location ${{ env.LOCATION }}
+        echo "✅ Resource group created/exists"
+
+    - name: Step 2 - Create App Service Plan
+      run: |
+        echo "Creating App Service Plan..."
+        az appservice plan create \
+          --name "grc-plan" \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --location ${{ env.LOCATION }} \
+          --sku FREE \
+          --is-linux
+        echo "✅ App Service Plan created"
+
+    - name: Step 3 - Create Web App
+      run: |
+        echo "Creating Web App..."
+        az webapp create \
+          --name ${{ env.APP_NAME }} \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --plan "grc-plan" \
+          --runtime "NODE:20-lts"
+        echo "✅ Web App created"
+
+    - name: Step 4 - Verify Web App Exists
+      run: |
+        echo "Verifying Web App..."
+        az webapp show --name ${{ env.APP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} --query name
+        echo "✅ Web App verified"
+
+    - name: Step 5 - Create Simple Deployment Package
+      run: |
+        echo "Creating deployment package..."
+        mkdir deploy
+        cp minimal-backend.cjs deploy/
+
+        cat > deploy/package.json << 'EOF'
+        {
+          "name": "grc-backend",
+          "version": "1.0.0",
+          "main": "minimal-backend.cjs",
+          "scripts": {"start": "node minimal-backend.cjs"},
+          "engines": {"node": ">=18.0.0"}
+        }
+        EOF
+
+        cd deploy && zip -r ../app.zip .
+        echo "✅ Deployment package created"
+
+    - name: Step 6 - Deploy Application
+      run: |
+        echo "Deploying application..."
+        az webapp deployment source config-zip \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --name ${{ env.APP_NAME }} \
+          --src app.zip
+        echo "✅ Application deployed"
+
+    - name: Step 7 - Configure App Settings
+      run: |
+        echo "Configuring app settings..."
+        az webapp config appsettings set \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --name ${{ env.APP_NAME }} \
+          --settings PORT=8080 NODE_ENV=production
+
+        az webapp config set \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --name ${{ env.APP_NAME }} \
+          --startup-file "node minimal-backend.cjs"
+        echo "✅ App configured"
+
+    - name: Step 8 - Wait and Test
+      run: |
+        echo "Waiting for app to start..."
+        sleep 60
+
+        APP_URL="https://${{ env.APP_NAME }}.azurewebsites.net"
+        echo "Testing: $APP_URL"
+
+        # Test with retries
+        for i in {1..5}; do
+          echo "Test attempt $i..."
+          if curl -f "$APP_URL/api/v1/health"; then
+            echo "✅ App is working!"
+            echo "Backend URL: $APP_URL"
+            echo "API Base: $APP_URL/api/v1"
+            exit 0
+          else
+            echo "Retry in 30s..."
+            sleep 30
+          fi
+        done
+
+        echo "❌ App not responding after 5 attempts"
+        exit 1

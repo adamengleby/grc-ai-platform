@@ -1,0 +1,24 @@
+properties:
+  template:
+    containers:
+    - image: mcr.microsoft.com/azure-functions/node:4-node20-appservice
+      name: grc-frontend-simple
+      env:
+      - name: NODE_ENV
+        value: production
+      - name: PORT
+        value: "8080"
+      - name: VITE_API_BASE_URL
+        value: "https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1"
+      command: ["/bin/sh"]
+      args: ["-c", "echo 'Building GRC Frontend from source with MCP validation removed...' && apt-get update && apt-get install -y git && git clone https://github.com/adamengleby/grc-ai-platform.git && cd grc-ai-platform/packages/frontend && npm install && echo 'Building React app without MCP validation...' && npm run build && echo 'Setting up production server...' && cat > server.js << 'EOF'\nconst express = require('express');\nconst path = require('path');\nconst app = express();\n\n// Security headers\napp.use((req, res, next) => {\n  res.header('X-Frame-Options', 'DENY');\n  res.header('X-Content-Type-Options', 'nosniff');\n  res.header('Referrer-Policy', 'strict-origin-when-cross-origin');\n  next();\n});\n\n// Serve static files from dist directory\napp.use(express.static('dist', { maxAge: '1d', etag: true }));\n\n// Health check\napp.get('/health', (req, res) => {\n  res.json({\n    status: 'healthy',\n    service: 'GRC React Frontend - Rebuilt Without MCP Validation',\n    version: '2025-09-25-rebuilt',\n    timestamp: new Date().toISOString(),\n    build: 'production-rebuilt',\n    features: ['no-mcp-validation-required']\n  });\n});\n\n// SPA fallback - serve index.html for all routes\napp.get('*', (req, res) => {\n  res.sendFile(path.join(__dirname, 'dist', 'index.html'));\n});\n\nconst port = process.env.PORT || 8080;\napp.listen(port, () => {\n  console.log('🚀 GRC Frontend (Rebuilt - No MCP Validation) on port', port);\n  console.log('🔗 API:', process.env.VITE_API_BASE_URL);\n  console.log('✅ Fresh build deployed - agents can be created without MCP servers');\n});\nEOF\necho 'Starting production server with latest build...' && node server.js"]
+      resources:
+        cpu: 1.0
+        memory: 2Gi
+    scale:
+      minReplicas: 1
+      maxReplicas: 3
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080
