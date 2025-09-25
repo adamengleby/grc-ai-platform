@@ -580,6 +580,113 @@ app.delete('/api/v1/simple-agents/:id', async (req, res) => {
   }
 });
 
+// LLM Configuration Update endpoint
+app.put('/api/v1/simple-llm-configs/:id', async (req, res) => {
+  try {
+    const db = getDatabase();
+    const { id } = req.params;
+    const {
+      name,
+      provider,
+      model,
+      api_endpoint,
+      api_key_vault_reference,
+      max_tokens,
+      temperature,
+      is_default,
+      is_enabled
+    } = req.body;
+
+    // If this is being set as default, unset other defaults for this tenant
+    if (is_default) {
+      const currentConfig = await db.query('SELECT tenant_id FROM llm_configs WHERE id = $1', [id]);
+      if (currentConfig.rows.length > 0) {
+        await db.query(`
+          UPDATE llm_configs
+          SET is_default = false
+          WHERE tenant_id = $1 AND id != $2
+        `, [currentConfig.rows[0].tenant_id, id]);
+      }
+    }
+
+    const result = await db.query(`
+      UPDATE llm_configs
+      SET name = COALESCE($1, name),
+          provider = COALESCE($2, provider),
+          model = COALESCE($3, model),
+          api_endpoint = COALESCE($4, api_endpoint),
+          api_key_vault_reference = COALESCE($5, api_key_vault_reference),
+          max_tokens = COALESCE($6, max_tokens),
+          temperature = COALESCE($7, temperature),
+          is_default = COALESCE($8, is_default),
+          is_enabled = COALESCE($9, is_enabled),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $10
+      RETURNING *
+    `, [name, provider, model, api_endpoint, api_key_vault_reference,
+        max_tokens, temperature, is_default, is_enabled, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'LLM configuration not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: result.rows[0]
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// LLM Configuration Delete endpoint
+app.delete('/api/v1/simple-llm-configs/:id', async (req, res) => {
+  try {
+    const db = getDatabase();
+    const { id } = req.params;
+
+    // Check if this config is being used by any agents
+    const agentsUsingConfig = await db.query(`
+      SELECT COUNT(*) as count FROM ai_agents WHERE llm_config_id = $1
+    `, [id]);
+
+    if (parseInt(agentsUsingConfig.rows[0].count) > 0) {
+      return res.status(409).json({
+        success: false,
+        error: `Cannot delete LLM configuration: ${agentsUsingConfig.rows[0].count} agent(s) are using this configuration`
+      });
+    }
+
+    const result = await db.query(`
+      DELETE FROM llm_configs WHERE id = $1 RETURNING *
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'LLM configuration not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'LLM configuration deleted successfully',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 app.get('/api/v1/database/status', async (req, res) => {
   try {
     const db = getDatabase();
