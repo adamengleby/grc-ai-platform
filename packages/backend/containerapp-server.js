@@ -137,6 +137,118 @@ app.get('/api/v1/database/status', async (req, res) => {
   }
 });
 
+app.post('/api/v1/database/deploy-schema', async (req, res) => {
+  try {
+    const db = getDatabase();
+
+    // Create tables in correct order
+    const statements = [
+      `CREATE TABLE IF NOT EXISTS tenants (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name VARCHAR(255) NOT NULL,
+        display_name VARCHAR(255) NOT NULL,
+        domain VARCHAR(255),
+        subscription_plan VARCHAR(50) DEFAULT 'free',
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(name),
+        UNIQUE(domain)
+      )`,
+
+      `CREATE TABLE IF NOT EXISTS users (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        email VARCHAR(255) NOT NULL,
+        full_name VARCHAR(255),
+        role VARCHAR(50) DEFAULT 'user',
+        is_active BOOLEAN DEFAULT true,
+        last_login TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, email)
+      )`,
+
+      `CREATE TABLE IF NOT EXISTS llm_configs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        created_by UUID NOT NULL REFERENCES users(id),
+        name VARCHAR(255) NOT NULL,
+        provider VARCHAR(100) NOT NULL,
+        model VARCHAR(255) NOT NULL,
+        api_endpoint TEXT,
+        api_key_vault_reference TEXT,
+        max_tokens INTEGER DEFAULT 4000,
+        temperature DECIMAL(3,2) DEFAULT 0.7,
+        is_enabled BOOLEAN DEFAULT true,
+        is_default BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, name)
+      )`,
+
+      `CREATE TABLE IF NOT EXISTS ai_agents (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        created_by UUID NOT NULL REFERENCES users(id),
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        persona TEXT,
+        system_prompt TEXT NOT NULL,
+        llm_config_id UUID REFERENCES llm_configs(id),
+        avatar VARCHAR(10),
+        color VARCHAR(7),
+        is_enabled BOOLEAN DEFAULT true,
+        usage_count INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, name)
+      )`,
+
+      `INSERT INTO tenants (id, name, display_name, domain) VALUES
+        ('00000000-0000-0000-0000-000000000001', 'demo-tenant', 'Demo Tenant', 'demo.example.com')
+        ON CONFLICT (name) DO NOTHING`,
+
+      `INSERT INTO users (id, tenant_id, email, full_name, role) VALUES
+        ('00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'admin@demo.example.com', 'Admin User', 'owner')
+        ON CONFLICT (tenant_id, email) DO NOTHING`
+    ];
+
+    const results = [];
+    for (let i = 0; i < statements.length; i++) {
+      try {
+        await db.query(statements[i]);
+        results.push({ statement: i + 1, status: 'success' });
+      } catch (error) {
+        results.push({ statement: i + 1, status: 'error', error: error.message });
+      }
+    }
+
+    // Check final state
+    const tables = await db.query(`
+      SELECT table_name, table_type
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+      ORDER BY table_name
+    `);
+
+    res.json({
+      success: true,
+      data: {
+        message: 'Schema deployment completed',
+        results: results,
+        tablesCreated: tables.rows.length,
+        tables: tables.rows.map(t => t.table_name)
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 const port = process.env.PORT || 3005;
 app.listen(port, () => {
   console.log('🚀 GRC AI Platform Backend with Database Integration');
