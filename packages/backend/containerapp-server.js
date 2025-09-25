@@ -723,6 +723,39 @@ app.delete('/api/v1/simple-llm-configs/:id', async (req, res) => {
   }
 });
 
+// Legacy/Direct endpoints for frontend compatibility
+app.get('/agents', async (req, res) => {
+  try {
+    const db = getDatabase();
+    const result = await db.query(`
+      SELECT a.id, a.name, a.description, a.persona, a.system_prompt,
+             a.avatar, a.color, a.is_enabled, a.usage_count,
+             a.created_at, a.updated_at,
+             t.name as tenant_name,
+             l.name as llm_config_name, l.provider, l.model
+      FROM ai_agents a
+      LEFT JOIN tenants t ON a.tenant_id = t.id
+      LEFT JOIN llm_configs l ON a.llm_config_id = l.id
+      WHERE a.is_enabled = true
+      ORDER BY a.created_at DESC
+    `);
+
+    res.json({
+      success: true,
+      data: {
+        agents: result.rows,
+        total: result.rows.length,
+        database: 'PostgreSQL integration active'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 app.get('/api/v1/database/status', async (req, res) => {
   try {
     const db = getDatabase();
