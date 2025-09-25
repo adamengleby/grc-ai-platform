@@ -404,9 +404,27 @@ app.post('/api/v1/simple-llm-configs', async (req, res) => {
     `, [tenant_id, created_by, name, provider, model, api_endpoint,
         api_key_vault_reference, max_tokens, temperature, is_default]);
 
+    // Format response to match frontend expectations
+    const config = result.rows[0];
+    const formattedConfig = {
+      config_id: config.id,
+      id: config.id,
+      name: config.name,
+      provider: config.provider,
+      model: config.model,
+      api_endpoint: config.api_endpoint,
+      max_tokens: config.max_tokens,
+      temperature: config.temperature,
+      is_default: config.is_default,
+      tenant_id: config.tenant_id,
+      created_by: config.created_by,
+      created_at: config.created_at,
+      updated_at: config.updated_at
+    };
+
     res.status(201).json({
       success: true,
-      data: result.rows[0]
+      data: formattedConfig
     });
   } catch (error) {
     if (error.code === '23505') { // Unique constraint violation
@@ -633,9 +651,27 @@ app.put('/api/v1/simple-llm-configs/:id', async (req, res) => {
       });
     }
 
+    // Format response to match frontend expectations
+    const config = result.rows[0];
+    const formattedConfig = {
+      config_id: config.id,
+      id: config.id,
+      name: config.name,
+      provider: config.provider,
+      model: config.model,
+      api_endpoint: config.api_endpoint,
+      max_tokens: config.max_tokens,
+      temperature: config.temperature,
+      is_default: config.is_default,
+      tenant_id: config.tenant_id,
+      created_by: config.created_by,
+      created_at: config.created_at,
+      updated_at: config.updated_at
+    };
+
     res.json({
       success: true,
-      data: result.rows[0]
+      data: formattedConfig
     });
   } catch (error) {
     res.status(500).json({
