@@ -10,7 +10,11 @@ export default defineConfig({
     {
       name: 'copy-staticwebapp-config',
       writeBundle() {
-        copyFileSync('staticwebapp.config.json', 'dist/staticwebapp.config.json')
+        try {
+          copyFileSync('staticwebapp.config.json', 'dist/staticwebapp.config.json')
+        } catch (error) {
+          console.warn('staticwebapp.config.json not found, skipping copy')
+        }
       }
     }
   ],
