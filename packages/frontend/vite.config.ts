@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
-import { copyFileSync } from 'fs'
+import { copyFileSync, existsSync } from 'fs'
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -10,10 +10,15 @@ export default defineConfig({
     {
       name: 'copy-staticwebapp-config',
       writeBundle() {
-        try {
-          copyFileSync('staticwebapp.config.json', 'dist/staticwebapp.config.json')
-        } catch (error) {
-          console.warn('staticwebapp.config.json not found, skipping copy')
+        if (existsSync('staticwebapp.config.json')) {
+          try {
+            copyFileSync('staticwebapp.config.json', 'dist/staticwebapp.config.json')
+            console.log('✅ staticwebapp.config.json copied successfully')
+          } catch (error) {
+            console.warn('⚠️ Failed to copy staticwebapp.config.json:', error)
+          }
+        } else {
+          console.warn('⚠️ staticwebapp.config.json not found, skipping copy')
         }
       }
     }
