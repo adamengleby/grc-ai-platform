@@ -15,7 +15,7 @@ properties:
         - -c
         - |
           set -e
-          echo "🚀 Building GRC React Frontend from GitHub Repository (FINAL VERSION)..."
+          echo "🚀 Building GRC React Frontend from GitHub Repository (FINAL WORKING VERSION)..."
 
           # Install required tools
           apt-get update -qq
@@ -24,49 +24,18 @@ properties:
           # Clone repository
           echo "📥 Cloning repository..."
           git clone https://github.com/adamengleby/grc-ai-platform.git /tmp/repo
+          cd /tmp/repo/packages/frontend
 
-          # Detect frontend structure
-          echo "🔍 Checking for frontend structure..."
-          if [ -d "/tmp/repo/packages/frontend" ]; then
-            echo "Found packages/frontend structure"
-            cd /tmp/repo/packages/frontend
-          elif [ -f "/tmp/repo/vite.config.ts" ]; then
-            echo "Found root frontend structure"
-            cd /tmp/repo
-          else
-            echo "ERROR: No frontend structure found"
-            exit 1
-          fi
-
-          echo "📁 Working directory: $(pwd)"
+          echo "📁 Frontend directory structure:"
           ls -la
 
-          # Install dependencies and build
-          echo "📦 Installing dependencies..."
-          # First install shared package dependencies
-          cd /tmp/repo/packages/shared
-          if [ -f "package.json" ]; then
-            echo "Installing shared package dependencies..."
-            npm install
-          fi
+          echo "📦 Installing ALL dependencies (including dev dependencies)..."
+          NODE_ENV=development npm install
 
-          # Then install frontend dependencies
-          cd /tmp/repo/packages/frontend
-          echo "Installing frontend dependencies..."
-          npm install
+          echo "🔧 Building React application..."
+          VITE_API_BASE_URL="https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1" npm run build
 
-          # Force install required build dependencies
-          echo "Installing required build dependencies..."
-          npm install --save-dev vite@^5.0.8 @vitejs/plugin-react typescript
-
-          # Verify vite is installed
-          echo "Checking vite installation..."
-          npm list vite
-
-          echo "🏗️ Building React application..."
-          VITE_API_BASE_URL="https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1" ./node_modules/.bin/vite build
-
-          echo "✅ Build completed. Verifying output..."
+          echo "✅ Build completed. Checking output..."
           ls -la dist/
 
           # Set up production app
@@ -74,6 +43,9 @@ properties:
           mkdir -p /app
           cp -r dist/* /app/
           cd /app
+
+          echo "📄 Production files:"
+          ls -la
 
           # Create package.json
           cat > package.json << 'PACKAGE_EOF'
@@ -115,14 +87,14 @@ properties:
           app.get('/health', (req, res) => {
             res.json({
               status: 'healthy',
-              service: 'GRC React Frontend - GitHub Production Build (FINAL)',
-              version: '2025-09-27-github-final-build',
+              service: 'GRC React Frontend - GitHub Production Build (FINAL WORKING)',
+              version: '2025-09-27-github-final-working-build',
               timestamp: new Date().toISOString(),
-              build: 'production-react-github-final',
+              build: 'production-react-github-final-working',
               features: {
                 'actual-react-app': true,
                 'mcp-validation-removed': true,
-                'github-adaptive-structure': true,
+                'github-working-build': true,
                 'production-build': true
               }
             });
@@ -147,10 +119,10 @@ properties:
 
           const port = process.env.PORT || 8080;
           app.listen(port, () => {
-            console.log('🚀 GRC React Frontend (GitHub FINAL Production Build) on port', port);
+            console.log('🚀 GRC React Frontend (GitHub FINAL WORKING Production Build) on port', port);
             console.log('🔗 API Base URL:', process.env.VITE_API_BASE_URL);
             console.log('✅ Proper React application with MCP validation removed');
-            console.log('📁 Built from GitHub repository with adaptive structure detection');
+            console.log('📁 Built from GitHub repository with all dependencies');
             console.log('🎯 Features: Full React UI, Agent creation without MCP');
           });
           SERVER_EOF
@@ -158,7 +130,7 @@ properties:
           echo "🧹 Cleaning up build artifacts..."
           rm -rf /tmp/repo
 
-          echo "🎉 Starting GitHub FINAL React production frontend..."
+          echo "🎉 Starting GitHub FINAL WORKING React production frontend..."
           node server.js
       resources:
         cpu: 1.25
