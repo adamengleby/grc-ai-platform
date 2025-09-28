@@ -194,7 +194,8 @@ videos/
 # Build artifacts
 build/
 dist/
-lib/
+# Note: Source lib/ directories should NOT be ignored (they contain source code)
+# Only ignore compiled lib/ output directories specifically where needed
 *.tgz
 *.tar.gz
 
