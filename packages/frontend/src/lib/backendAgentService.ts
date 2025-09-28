@@ -74,7 +74,17 @@ export class BackendAgentService {
       }
 
       console.log(`✅ [Backend Agents] Loaded ${data.data.agents.length} agents from database`);
-      return data.data.agents;
+
+      // Map backend field names to frontend expected field names
+      const mappedAgents = data.data.agents.map((agent: any) => ({
+        ...agent,
+        isEnabled: agent.is_enabled !== undefined ? agent.is_enabled : agent.isEnabled,
+        usageCount: agent.usage_count !== undefined ? agent.usage_count : agent.usageCount,
+        createdAt: agent.created_at || agent.createdAt,
+        updatedAt: agent.updated_at || agent.updatedAt
+      }));
+
+      return mappedAgents;
     } catch (error) {
       console.error('❌ [Backend Agents] Failed to load agents:', error);
       throw error;
