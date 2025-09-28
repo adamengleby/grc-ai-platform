@@ -80,6 +80,7 @@ export class BackendAgentService {
         ...agent,
         isEnabled: agent.is_enabled !== undefined ? agent.is_enabled : agent.isEnabled,
         usageCount: agent.usage_count !== undefined ? agent.usage_count : agent.usageCount,
+        llmConfigId: agent.llm_config_id || agent.llmConfigId,
         createdAt: agent.created_at || agent.createdAt,
         updatedAt: agent.updated_at || agent.updatedAt
       }));
@@ -176,10 +177,21 @@ export class BackendAgentService {
         headers['x-tenant-id'] = tenant.id;
       }
 
+      // Map frontend field names to backend expected field names
+      const backendUpdates = { ...updates };
+      if (updates.isEnabled !== undefined) {
+        backendUpdates.is_enabled = updates.isEnabled;
+        delete backendUpdates.isEnabled;
+      }
+      if (updates.llmConfigId !== undefined) {
+        backendUpdates.llm_config_id = updates.llmConfigId;
+        delete backendUpdates.llmConfigId;
+      }
+
       const response = await fetch(`${this.baseUrl}/simple-agents/${agentId}`, {
         method: 'PUT',
         headers,
-        body: JSON.stringify(updates),
+        body: JSON.stringify(backendUpdates),
       });
 
       if (!response.ok) {
@@ -193,6 +205,20 @@ export class BackendAgentService {
       }
 
       console.log('✅ [Backend Agents] Updated agent in database');
+
+      // Map response field names to frontend expected field names
+      if (data.data) {
+        const mappedAgent = {
+          ...data.data,
+          isEnabled: data.data.is_enabled !== undefined ? data.data.is_enabled : data.data.isEnabled,
+          llmConfigId: data.data.llm_config_id || data.data.llmConfigId,
+          usageCount: data.data.usage_count !== undefined ? data.data.usage_count : data.data.usageCount,
+          createdAt: data.data.created_at || data.data.createdAt,
+          updatedAt: data.data.updated_at || data.data.updatedAt
+        };
+        return mappedAgent;
+      }
+
       return data.data;
     } catch (error) {
       console.error('❌ [Backend Agents] Failed to update agent:', error);
