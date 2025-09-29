@@ -1,0 +1,73 @@
+properties:
+  template:
+    containers:
+    - name: grc-frontend-react
+      image: node:20-alpine
+      env:
+      - name: NODE_ENV
+        value: production
+      - name: PORT
+        value: "8080"
+      - name: VITE_API_BASE_URL
+        value: "https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1"
+      command:
+      - "/bin/sh"
+      - "-c"
+      - |
+        echo "🚀 Installing system dependencies..."
+        apk add --no-cache git curl bash
+        echo "📥 Cloning repository..."
+        git clone https://github.com/adamengleby/grc-ai-platform.git /tmp/repo
+        cd /tmp/repo
+        echo "🔍 Checking frontend structure..."
+        if [ -d "packages/frontend" ]; then
+          echo "Found packages/frontend structure"
+          cd packages/frontend
+        fi
+        echo "📦 Installing dependencies..."
+        npm ci
+        echo "🏗️ Building React application..."
+        npm run build
+        echo "🚚 Setting up production server..."
+        mkdir -p /app
+        cp -r dist/* /app/
+        cd /app
+        npm init -y
+        npm install express
+        cat > server.js << 'EOF'
+        const express = require('express');
+        const path = require('path');
+        const app = express();
+
+        app.use(express.static('.'));
+
+        app.get('/health', (req, res) => {
+          res.json({
+            status: 'healthy',
+            service: 'GRC React Frontend - GitHub Production Build',
+            timestamp: new Date().toISOString(),
+            features: {
+              'react-app': true,
+              'github-source': true
+            }
+          });
+        });
+
+        app.get('*', (req, res) => {
+          res.sendFile(path.join(__dirname, 'index.html'));
+        });
+
+        const port = process.env.PORT || 8080;
+        app.listen(port, () => {
+          console.log('🚀 GRC React Frontend running on port', port);
+        });
+        EOF
+        rm -rf /tmp/repo
+        node server.js
+      resources:
+        cpu: 1.0
+        memory: 2.0Gi
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080

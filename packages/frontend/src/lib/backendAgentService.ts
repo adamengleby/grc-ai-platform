@@ -5,12 +5,9 @@
  */
 
 import { AIAgent } from '@/types/agent';
+import { buildApiUrl } from '@/utils/apiUrls';
 
 export class BackendAgentService {
-  // Use direct backend URL in development, Container Apps backend in production
-  private baseUrl = import.meta.env.DEV
-    ? 'http://localhost:8080/api/v1'
-    : (import.meta.env.VITE_API_BASE_URL || 'https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1');
 
   /**
    * Test database connection
@@ -19,7 +16,7 @@ export class BackendAgentService {
     try {
       console.log('🧪 [Backend Agents] Testing database connection...');
 
-      const response = await fetch(`${this.baseUrl}/simple-agents`);
+      const response = await fetch(buildApiUrl('simple-agents'));
 
       if (!response.ok) {
         console.warn('⚠️ [Backend Agents] Connection test failed:', response.status);
@@ -59,7 +56,7 @@ export class BackendAgentService {
         headers['x-tenant-id'] = tenant.id;
       }
 
-      const response = await fetch(`${this.baseUrl}/simple-agents`, {
+      const response = await fetch(buildApiUrl('simple-agents'), {
         headers
       });
 
@@ -122,7 +119,7 @@ export class BackendAgentService {
         headers['x-tenant-id'] = tenant.id;
       }
 
-      const response = await fetch(`${this.baseUrl}/simple-agents/create`, {
+      const response = await fetch(buildApiUrl('simple-agents/create'), {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -188,7 +185,7 @@ export class BackendAgentService {
         delete backendUpdates.llmConfigId;
       }
 
-      const response = await fetch(`${this.baseUrl}/simple-agents/${agentId}`, {
+      const response = await fetch(buildApiUrl(`simple-agents/${agentId}`), {
         method: 'PUT',
         headers,
         body: JSON.stringify(backendUpdates),
@@ -250,7 +247,7 @@ export class BackendAgentService {
         headers['x-tenant-id'] = tenant.id;
       }
 
-      const response = await fetch(`${this.baseUrl}/simple-agents/${agentId}`, {
+      const response = await fetch(buildApiUrl(`simple-agents/${agentId}`), {
         method: 'DELETE',
         headers,
       });

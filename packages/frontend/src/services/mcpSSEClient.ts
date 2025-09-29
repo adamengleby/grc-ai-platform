@@ -33,7 +33,7 @@ export class MCPSSEClient {
     : 'https://grc-mcp-server-prod.eastus.azurecontainer.io:3006/mcp';  // MCP Streamable HTTP endpoint
   private readonly backendUrl = import.meta.env.DEV
     ? 'http://localhost:3005/api/v1'
-    : 'https://func-grc-backend-prod.azurewebsites.net/api/v1';  // Backend for configs only
+    : 'https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1';  // Backend for configs only
 
   /**
    * Test connection to MCP server (Streamable HTTP doesn't require persistent connection)

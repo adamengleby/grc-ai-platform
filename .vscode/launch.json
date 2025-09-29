@@ -1,0 +1,173 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Frontend (Chrome)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/packages/frontend/src",
+      "sourceMapPathOverrides": {
+        "webpack:///src/*": "${webRoot}/*"
+      },
+      "preLaunchTask": "npm: dev - packages/frontend"
+    },
+    {
+      "name": "Debug MCP Server",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/packages/mcp-server/dist/index.js",
+      "cwd": "${workspaceFolder}/packages/mcp-server",
+      "env": {
+        "NODE_ENV": "development"
+      },
+      "console": "integratedTerminal",
+      "sourceMaps": true,
+      "outFiles": [
+        "${workspaceFolder}/packages/mcp-server/dist/**/*.js"
+      ],
+      "preLaunchTask": "npm: build - packages/mcp-server"
+    },
+    {
+      "name": "Debug MCP Server (TypeScript)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/packages/mcp-server/src/index.ts",
+      "cwd": "${workspaceFolder}/packages/mcp-server",
+      "runtimeArgs": [
+        "--loader",
+        "ts-node/esm"
+      ],
+      "env": {
+        "NODE_ENV": "development",
+        "NODE_OPTIONS": "--loader ts-node/esm"
+      },
+      "console": "integratedTerminal",
+      "sourceMaps": true
+    },
+    {
+      "name": "Debug Backend API",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/packages/backend/dist/index.js",
+      "cwd": "${workspaceFolder}/packages/backend",
+      "env": {
+        "NODE_ENV": "development",
+        "PORT": "3001"
+      },
+      "console": "integratedTerminal",
+      "sourceMaps": true,
+      "outFiles": [
+        "${workspaceFolder}/packages/backend/dist/**/*.js"
+      ],
+      "preLaunchTask": "npm: build - packages/backend"
+    },
+    {
+      "name": "Debug Jest Tests",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/.bin/jest",
+      "args": [
+        "--runInBand",
+        "--no-cache",
+        "--no-coverage"
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "NODE_ENV": "test"
+      },
+      "console": "integratedTerminal",
+      "sourceMaps": true
+    },
+    {
+      "name": "Debug Current Jest Test File",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/.bin/jest",
+      "args": [
+        "${relativeFile}",
+        "--runInBand",
+        "--no-cache",
+        "--no-coverage"
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "NODE_ENV": "test"
+      },
+      "console": "integratedTerminal",
+      "sourceMaps": true
+    },
+    {
+      "name": "Attach to Azure Function",
+      "type": "node",
+      "request": "attach",
+      "port": 9229,
+      "localRoot": "${workspaceFolder}",
+      "remoteRoot": "/home/site/wwwroot"
+    },
+    {
+      "name": "Debug Docker Container",
+      "type": "node",
+      "request": "attach",
+      "port": 9229,
+      "address": "localhost",
+      "localRoot": "${workspaceFolder}",
+      "remoteRoot": "/app",
+      "protocol": "inspector"
+    },
+    {
+      "name": "Debug Multi-Tenant Test",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/packages/backend/src/test/multi-tenant.test.ts",
+      "runtimeArgs": [
+        "--loader",
+        "ts-node/esm"
+      ],
+      "env": {
+        "NODE_ENV": "test",
+        "TENANT_ID": "test-tenant-001"
+      },
+      "console": "integratedTerminal",
+      "sourceMaps": true
+    },
+    {
+      "name": "Debug Security Tests",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/.bin/jest",
+      "args": [
+        "--testPathPattern=security",
+        "--runInBand",
+        "--no-cache",
+        "--verbose"
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "NODE_ENV": "test",
+        "ENABLE_SECURITY_LOGS": "true"
+      },
+      "console": "integratedTerminal",
+      "sourceMaps": true
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Debug Full Stack",
+      "configurations": [
+        "Debug MCP Server",
+        "Debug Backend API",
+        "Debug Frontend (Chrome)"
+      ],
+      "stopAll": true
+    },
+    {
+      "name": "Debug Multi-Tenant Environment",
+      "configurations": [
+        "Debug MCP Server",
+        "Debug Backend API"
+      ],
+      "stopAll": true
+    }
+  ]
+}

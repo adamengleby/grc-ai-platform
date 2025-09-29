@@ -1,0 +1,166 @@
+location: australiasoutheast
+name: grc-frontend-simple
+resourceGroup: rg-grc-ai-platform-syd
+type: Microsoft.App/containerApps
+properties:
+  environmentId: /subscriptions/2e6b5431-6d83-4072-8ccc-86af69cf22b0/resourceGroups/rg-grc-ai-platform-syd/providers/Microsoft.App/managedEnvironments/grc-containerapp-env
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080
+  template:
+    containers:
+    - name: grc-frontend-simple
+      image: mcr.microsoft.com/azure-functions/node:4-node20-appservice
+      resources:
+        cpu: 1.0
+        memory: 2Gi
+        ephemeralStorage: 4Gi
+      env:
+      - name: NODE_ENV
+        value: "production"
+      - name: PORT
+        value: "8080"
+      - name: VITE_API_BASE_URL
+        value: "https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1"
+      command:
+      - /bin/bash
+      args:
+      - -c
+      - |
+        set -e
+        echo "🚀 GRC Frontend Deployment - API URL Fix Version..."
+
+        # Install required tools
+        apt-get update -qq
+        apt-get install -y git curl
+
+        # Clone latest code
+        echo "📥 Cloning latest code with API URL fixes..."
+        git clone https://github.com/adamengleby/grc-ai-platform.git /tmp/repo
+        cd /tmp/repo
+
+        echo "📋 Latest commit:"
+        git log -1 --oneline
+
+        cd packages/frontend
+
+        echo "🔍 Verifying frontend structure..."
+        ls -la src/utils/
+
+        # Verify the API URL utility exists
+        if [ -f "src/utils/apiUrls.ts" ]; then
+          echo "✅ Found apiUrls.ts - checking content:"
+          grep -A 5 "export const buildApiUrl" src/utils/apiUrls.ts || echo "Pattern not found"
+        else
+          echo "❌ apiUrls.ts missing"
+          exit 1
+        fi
+
+        echo "📦 Installing dependencies..."
+        NODE_ENV=development npm install
+
+        echo "🔧 Building React application with API URL fix..."
+        echo "API Base URL: $VITE_API_BASE_URL"
+
+        # Build with explicit environment
+        VITE_API_BASE_URL="https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1" npm run build
+
+        echo "✅ Build completed. Checking dist output..."
+        ls -la dist/
+
+        # Set up production server
+        echo "🚚 Setting up production server..."
+        mkdir -p /app
+        cp -r dist/* /app/
+        cd /app
+
+        # Create production package.json
+        cat > package.json << 'EOF'
+        {
+          "name": "grc-frontend-api-url-fixed",
+          "version": "1.0.1",
+          "main": "server.js",
+          "dependencies": {
+            "express": "^4.19.2"
+          }
+        }
+        EOF
+
+        npm install
+
+        # Create Express server with debugging
+        cat > server.js << 'EOF'
+        const express = require('express');
+        const path = require('path');
+        const app = express();
+
+        // Log all requests for debugging
+        app.use((req, res, next) => {
+          console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
+          next();
+        });
+
+        // Serve static files
+        app.use(express.static('.'));
+
+        // Health check with API URL info
+        app.get('/health', (req, res) => {
+          res.json({
+            status: 'healthy',
+            service: 'GRC Frontend - API URL FIXED',
+            version: '1.0.1-api-url-fixed',
+            timestamp: new Date().toISOString(),
+            apiBaseUrl: process.env.VITE_API_BASE_URL,
+            fixes: ['API URL configuration', 'Version footer', 'Environment debugging']
+          });
+        });
+
+        // Test API connectivity
+        app.get('/api-test', async (req, res) => {
+          try {
+            const fetch = await import('node-fetch').then(m => m.default || m);
+            const testUrl = 'https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1/simple-llm-configs';
+            console.log('Testing backend API:', testUrl);
+            const response = await fetch(testUrl);
+            const data = await response.json();
+            res.json({
+              status: 'api-test',
+              testUrl,
+              success: response.ok,
+              data: response.ok ? data : null,
+              error: response.ok ? null : `HTTP ${response.status}`
+            });
+          } catch (error) {
+            res.json({
+              status: 'api-test',
+              success: false,
+              error: error.message
+            });
+          }
+        });
+
+        // SPA fallback
+        app.get('*', (req, res) => {
+          res.sendFile(path.join(__dirname, 'index.html'));
+        });
+
+        const port = process.env.PORT || 8080;
+        app.listen(port, () => {
+          console.log('🚀 GRC Frontend (API URL FIXED) running on port', port);
+          console.log('🔗 API Base URL:', process.env.VITE_API_BASE_URL);
+          console.log('✅ FIXES APPLIED:');
+          console.log('  ✅ API URL configuration verified');
+          console.log('  ✅ Version footer added');
+          console.log('  ✅ Environment debugging enabled');
+        });
+        EOF
+
+        echo "🧹 Cleaning up..."
+        rm -rf /tmp/repo
+
+        echo "🎉 Starting frontend with API URL fixes..."
+        node server.js
+    scale:
+      minReplicas: 1
+      maxReplicas: 2

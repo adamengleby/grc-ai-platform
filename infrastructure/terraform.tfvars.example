@@ -1,0 +1,58 @@
+# Azure Configuration
+subscription_id = "your-azure-subscription-id"
+tenant_id       = "your-azure-tenant-id"
+
+# Resource Configuration
+resource_group_name = "rg-grc-ai-platform-prod"
+location           = "East US"
+environment        = "prod"
+
+# Security Configuration
+oauth_secret = "your-super-secure-oauth-secret-32-characters-min"
+auth0_domain = "your-auth0-domain.us.auth0.com"
+
+# Performance Configuration
+cosmos_db_throughput = 400
+app_service_sku     = "B1"
+
+# CORS Configuration
+allowed_origins = [
+  "https://grcplatform.com",
+  "https://*.grcplatform.com",
+  "https://acme.grcplatform.com",
+  "https://fintech.grcplatform.com"
+]
+
+# Tenant Configuration
+default_tenants = [
+  {
+    id              = "tenant-acme-001"
+    name            = "ACME Corporation"
+    slug            = "acme"
+    domain          = "acme.grcplatform.com"
+    auth0_client_id = "your-acme-auth0-client-id"
+  },
+  {
+    id              = "tenant-fintech-001"
+    name            = "FinTech Corp"
+    slug            = "fintech"
+    domain          = "fintech.grcplatform.com"
+    auth0_client_id = "your-fintech-auth0-client-id"
+  },
+  {
+    id              = "tenant-admin-001"
+    name            = "Platform Administration"
+    slug            = "platform-admin"
+    domain          = "admin.grcplatform.com"
+    auth0_client_id = "your-admin-auth0-client-id"
+  }
+]
+
+# Container Configuration
+mcp_server_image = "grc-mcp-server:latest"
+container_cpu    = 1
+container_memory = 2
+
+# Monitoring Configuration
+log_retention_days = 30
+enable_monitoring = true

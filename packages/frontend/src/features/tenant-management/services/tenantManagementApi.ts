@@ -11,7 +11,7 @@ import {
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV
   ? 'http://localhost:3005/api/v1'
-  : 'https://func-grc-backend-prod.azurewebsites.net/api/v1');
+  : 'https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1');
 
 class TenantManagementApiService {
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
