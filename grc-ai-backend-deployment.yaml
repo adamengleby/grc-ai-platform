@@ -1,0 +1,162 @@
+location: australiasoutheast
+name: grc-ai-backend
+resourceGroup: rg-grc-ai-platform-syd
+type: Microsoft.App/containerApps
+properties:
+  environmentId: /subscriptions/2e6b5431-6d83-4072-8ccc-86af69cf22b0/resourceGroups/rg-grc-ai-platform-syd/providers/Microsoft.App/managedEnvironments/grc-containerapp-env
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080
+  template:
+    containers:
+    - name: grc-ai-backend
+      image: mcr.microsoft.com/azure-functions/node:4-node20-appservice
+      resources:
+        cpu: 1.0
+        memory: 2Gi
+        ephemeralStorage: 4Gi
+      env:
+      - name: NODE_ENV
+        value: "production"
+      - name: PORT
+        value: "8080"
+      - name: POSTGRES_HOST
+        value: "grc-postgres-syd.postgres.database.azure.com"
+      - name: POSTGRES_DATABASE
+        value: "grc_platform"
+      - name: POSTGRES_USER
+        value: "grcadmin"
+      - name: POSTGRES_PASSWORD
+        value: "GRC2024!Secure"
+      - name: CORS_ORIGINS
+        value: "https://grc-ai-frontend.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io,http://localhost:5173,*"
+      command:
+      - /bin/bash
+      args:
+      - -c
+      - |
+        set -e
+        echo "🚀 GRC AI Backend v2.0.0 - STANDARDIZED NAMING..."
+
+        # Install required tools
+        apt-get update -qq
+        apt-get install -y git curl
+
+        # Clone latest code
+        echo "📥 Cloning latest backend code..."
+        rm -rf /tmp/repo 2>/dev/null || true
+        git clone --depth 1 https://github.com/adamengleby/grc-ai-platform.git /tmp/repo
+        cd /tmp/repo
+
+        echo "📋 Latest commit:"
+        git log -1 --oneline
+
+        # Set up production server
+        echo "🚚 Setting up production backend with standardized naming..."
+        mkdir -p /app
+        cd /app
+
+        # Copy the updated server file
+        cp /tmp/repo/packages/backend/containerapp-server-v7.js server.js
+
+        # Create production package.json
+        cat > package.json << 'EOF'
+        {
+          "name": "grc-ai-backend",
+          "version": "2.0.0",
+          "main": "server.js",
+          "dependencies": {
+            "express": "^4.19.2",
+            "cors": "^2.8.5",
+            "pg": "^8.11.0"
+          }
+        }
+        EOF
+
+        echo "📦 Installing dependencies..."
+        npm install
+
+        echo "🔧 Applying CORS and naming standardization..."
+        # Update server.js to ensure proper CORS headers and naming
+        cat > naming-standardization-patch.js << 'EOF'
+        const fs = require('fs');
+        let serverCode = fs.readFileSync('server.js', 'utf8');
+
+        // Ensure health endpoint has explicit CORS headers and updated naming
+        const healthEndpointPatch = `
+        // Health check endpoint with explicit CORS headers
+        app.get('/health', async (req, res) => {
+          // Set CORS headers explicitly for health endpoint
+          res.header('Access-Control-Allow-Origin', '*');
+          res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+          res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-tenant-id, x-user-id');
+
+          const currentTime = new Date();
+          const healthStatus = {
+            status: 'healthy',
+            service: 'GRC AI Platform Backend - Standardized Naming',
+            version: \`2.0.0-standardized-\${currentTime.toISOString().split('T')[0]} \${currentTime.toISOString().split('T')[1].split('.')[0]}\`,
+            timestamp: currentTime.toISOString(),
+            environment: 'Azure Container Apps',
+            corsEnabled: true,
+            allowedOrigins: process.env.CORS_ORIGINS || '*',
+            naming: {
+              frontend: 'grc-ai-frontend',
+              backend: 'grc-ai-backend',
+              database: 'grc-postgres-syd',
+              environment: 'grc-containerapp-env'
+            },
+            database: {
+              type: 'PostgreSQL',
+              host: process.env.POSTGRES_HOST,
+              user: process.env.POSTGRES_USER,
+              database: process.env.POSTGRES_DATABASE,
+              connected: false
+            }
+          };
+
+          // Test database connection
+          try {
+            const db = getDatabase();
+            const result = await db.query('SELECT 1 as health_check, version()');
+            healthStatus.database.connected = true;
+            healthStatus.database.result = result.rows[0];
+            healthStatus.database.connectionInfo = 'Connected to ' + process.env.POSTGRES_HOST;
+          } catch (error) {
+            healthStatus.database.connected = false;
+            healthStatus.database.error = error.message;
+            healthStatus.database.connectionAttempt = process.env.POSTGRES_HOST;
+          }
+
+          res.json(healthStatus);
+        });`;
+
+        // Replace the existing health endpoint
+        serverCode = serverCode.replace(
+          /\/\/ Health check endpoint[\s\S]*?res\.json\(healthStatus\);\s*\}\);/,
+          healthEndpointPatch
+        );
+
+        fs.writeFileSync('server.js', serverCode);
+        console.log('✅ Naming standardization and CORS patch applied');
+        EOF
+
+        node naming-standardization-patch.js
+
+        echo "🧹 Cleaning up..."
+        rm -rf /tmp/repo naming-standardization-patch.js
+
+        echo "🎉 Starting GRC AI Backend v2.0.0 with Standardized Naming..."
+        echo "🔗 Database Host: $POSTGRES_HOST"
+        echo "🔗 Database User: $POSTGRES_USER"
+        echo "🔗 Database Name: $POSTGRES_DATABASE"
+        echo "🔗 CORS Origins: $CORS_ORIGINS"
+        echo "🏷️  New Naming Convention:"
+        echo "    Frontend: grc-ai-frontend"
+        echo "    Backend: grc-ai-backend"
+        echo "    Database: grc-postgres-syd"
+        node server.js
+    scale:
+      minReplicas: 1
+      maxReplicas: 2
