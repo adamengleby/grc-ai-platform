@@ -30,7 +30,11 @@ export const DashboardLayout: React.FC = () => {
   useEffect(() => {
     const fetchBackendVersion = async () => {
       try {
-        const response = await fetch(buildApiUrl('health'));
+        // Health endpoint is at root level, not under /api/v1
+        const backendBaseUrl = import.meta.env.DEV
+          ? 'http://localhost:3005'
+          : 'https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io';
+        const response = await fetch(`${backendBaseUrl}/health`);
         const data = await response.json();
         setBackendVersion(data.version || 'unknown');
       } catch (error) {
