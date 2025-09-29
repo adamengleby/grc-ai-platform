@@ -1,0 +1,48 @@
+properties:
+  managedEnvironmentId: /subscriptions/2e6b5431-6d83-4072-8ccc-86af69cf22b0/resourceGroups/rg-grc-ai-platform-syd/providers/Microsoft.App/managedEnvironments/grc-containerapp-env
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080
+      transport: auto
+    activeRevisionsMode: Single
+  template:
+    containers:
+    - image: node:20-alpine
+      name: grc-backend
+      env:
+      - name: NODE_ENV
+        value: production
+      - name: PORT
+        value: "8080"
+      command:
+      - node
+      args:
+      - -e
+      - |
+        const http = require('http');
+        const server = http.createServer((req, res) => {
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Content-Type', 'application/json');
+          if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
+          if (req.url === '/health') {
+            res.writeHead(200);
+            res.end(JSON.stringify({status: 'healthy', service: 'Node.js Container', timestamp: new Date().toISOString()}));
+            return;
+          }
+          if (req.url === '/api/v1/simple-llm-configs') {
+            res.writeHead(200);
+            res.end(JSON.stringify({success: true, data: {llm_configs: [{id: '1', name: 'Sydney Backend'}]}}));
+            return;
+          }
+          res.writeHead(200);
+          res.end(JSON.stringify({message: 'GRC Backend - Container App', url: req.url}));
+        });
+        server.listen(8080, () => console.log('Server running on port 8080'));
+      resources:
+        cpu: 0.25
+        memory: 0.5Gi
+    scale:
+      minReplicas: 1
+      maxReplicas: 3
+location: Australia Southeast

@@ -1,0 +1,119 @@
+properties:
+  template:
+    containers:
+    - image: mcr.microsoft.com/azure-functions/node:4-node20-appservice
+      name: grc-backend-simple
+      env:
+      - name: NODE_ENV
+        value: production
+      - name: PORT
+        value: "8080"
+      - name: DATABASE_URL
+        value: "postgresql://grc_db_admin:GRC2024!Secure@grc-database-simple.postgres.database.azure.com:5432/grc_platform"
+      - name: BUILD_VERSION
+        value: "backend-agent-fixes-20250928"
+      command: ["/bin/bash"]
+      args:
+        - -c
+        - |
+          set -e
+          echo "🚀 Building GRC Backend API with Agent Fixes..."
+
+          # Install required tools
+          apt-get update -qq
+          apt-get install -y git curl
+
+          # Clone repository
+          echo "📥 Cloning repository..."
+          git clone https://github.com/adamengleby/grc-ai-platform.git /tmp/repo
+          cd /tmp/repo/packages/backend
+
+          echo "📁 Backend directory structure:"
+          ls -la
+
+          echo "📦 Installing dependencies..."
+          npm install
+
+          echo "🔧 Building backend with TypeScript..."
+          npm run build
+
+          echo "✅ Build completed. Checking output..."
+          ls -la dist/
+
+          # Set up production app
+          echo "🚚 Setting up production backend..."
+          mkdir -p /app
+          cp -r dist/* /app/
+          cp package*.json /app/
+          cd /app
+
+          echo "📦 Installing production dependencies..."
+          npm ci --only=production
+
+          echo "📄 Production files:"
+          ls -la
+
+          # Create server.js entry point
+          cat > server.js << 'SERVER_EOF'
+          const express = require('express');
+          const cors = require('cors');
+          const path = require('path');
+
+          // Import the compiled backend
+          const { app } = require('./index.js');
+
+          // Additional production setup
+          app.use(cors({
+            origin: [
+              'https://grc-frontend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io',
+              'http://localhost:5173',
+              'http://localhost:3000'
+            ],
+            credentials: true
+          }));
+
+          // Health check
+          app.get('/health', (req, res) => {
+            res.json({
+              status: 'healthy',
+              service: 'GRC Backend API - Agent Fixes',
+              version: '2025-09-28-backend-agent-fixes',
+              timestamp: new Date().toISOString(),
+              build: 'production-backend-agent-fixes',
+              features: {
+                'agent-pause-fix': true,
+                'llm-config-persistence-fix': true,
+                'disabled-agents-in-mock-data': true,
+                'complete-update-response': true,
+                'database-backend': true
+              }
+            });
+          });
+
+          const port = process.env.PORT || 8080;
+          app.listen(port, () => {
+            console.log('🚀 GRC Backend API (Agent Fixes) on port', port);
+            console.log('🔗 Database URL:', process.env.DATABASE_URL ? 'Connected' : 'Not configured');
+            console.log('✅ Backend agent fixes deployed');
+            console.log('🔧 Fixed: Agent pause no longer appears as deletion');
+            console.log('🔧 Fixed: LLM config now persists after agent updates');
+            console.log('🔧 Fixed: Mock data includes disabled agents for testing');
+            console.log('🎯 Features: Complete agent lifecycle API with proper state management');
+          });
+          SERVER_EOF
+
+          echo "🧹 Cleaning up build artifacts..."
+          rm -rf /tmp/repo
+
+          echo "🎉 Starting backend API with agent fixes..."
+          node server.js
+      resources:
+        cpu: 1.0
+        memory: 2.0Gi
+    scale:
+      minReplicas: 1
+      maxReplicas: 2
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080

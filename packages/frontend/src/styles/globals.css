@@ -1,0 +1,278 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    /* Enhanced typography for professional appearance */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", sans-serif;
+    letter-spacing: -0.01em;
+  }
+  
+  /* Improved focus styles for accessibility */
+  *:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Modern button components */
+  .btn {
+    @apply inline-flex items-center justify-center rounded-lg text-sm font-medium transition-all duration-200;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2;
+    @apply disabled:pointer-events-none disabled:opacity-50;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  }
+  
+  .btn-primary {
+    @apply bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm hover:shadow-md;
+    @apply hover:scale-105 active:scale-95;
+  }
+  
+  .btn-secondary {
+    @apply bg-secondary text-secondary-foreground hover:bg-secondary/80 shadow-sm hover:shadow-md;
+  }
+  
+  .btn-success {
+    @apply bg-success text-success-foreground hover:bg-success/90 shadow-sm hover:shadow-md;
+  }
+  
+  .btn-warning {
+    @apply bg-warning text-warning-foreground hover:bg-warning/90 shadow-sm hover:shadow-md;
+  }
+  
+  .btn-gradient {
+    @apply bg-gradient-blue text-white shadow-md hover:shadow-lg;
+    @apply hover:scale-105 active:scale-95;
+  }
+  
+  /* Enhanced modern card styling */
+  .card {
+    @apply rounded-lg border bg-card text-card-foreground shadow-card;
+    transition: all 0.2s ease-in-out;
+    backdrop-filter: blur(10px);
+  }
+  
+  .card:hover {
+    @apply shadow-card-hover;
+    transform: translateY(-1px);
+  }
+  
+  /* Modern card variants */
+  .card-clean {
+    @apply rounded-xl bg-white border-0;
+    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.08), 0 1px 2px 0 rgb(0 0 0 / 0.04);
+  }
+  
+  .card-elevated {
+    @apply rounded-xl bg-card border-0 shadow-card-lg;
+  }
+  
+  .card-gradient {
+    @apply rounded-xl border-0 bg-gradient-blue text-white shadow-card-lg;
+  }
+  
+  /* Modern GRC-specific status indicators */
+  .status-good {
+    @apply bg-status-good text-white px-3 py-1 rounded-full text-sm font-medium;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  }
+  
+  .status-medium {
+    @apply bg-status-medium text-white px-3 py-1 rounded-full text-sm font-medium;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  }
+  
+  .status-critical {
+    @apply bg-status-critical text-white px-3 py-1 rounded-full text-sm font-medium;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  }
+  
+  .status-pending {
+    @apply bg-status-pending text-white px-3 py-1 rounded-full text-sm font-medium;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  }
+  
+  /* Legacy status indicators (backward compatibility) */
+  .status-compliant {
+    @apply status-good;
+  }
+  
+  .status-at-risk {
+    @apply status-medium;
+  }
+  
+  .status-non-compliant {
+    @apply status-critical;
+  }
+  
+  /* Enhanced chat interface */
+  .chat-container {
+    @apply bg-white border border-[hsl(var(--chat-border))] rounded-xl;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -1px rgb(0 0 0 / 0.06);
+  }
+  
+  .chat-message-user {
+    @apply bg-[hsl(var(--chat-user-bg))] text-[hsl(var(--chat-user-fg))] rounded-xl px-4 py-3 shadow-sm;
+    max-width: 80%;
+    word-wrap: break-word;
+  }
+  
+  .chat-message-agent {
+    @apply bg-[hsl(var(--chat-agent-bg))] text-[hsl(var(--chat-agent-fg))] border border-[hsl(var(--chat-border))] rounded-xl px-4 py-3 shadow-sm;
+    max-width: 85%;
+  }
+  
+  /* Professional data tables */
+  .data-table {
+    @apply border-collapse border border-[hsl(var(--border))] rounded-lg overflow-hidden;
+  }
+  
+  .data-table th {
+    @apply bg-[hsl(var(--muted))] text-[hsl(var(--foreground))] font-semibold px-4 py-3 text-left border-b border-[hsl(var(--border))];
+  }
+  
+  .data-table td {
+    @apply px-4 py-3 border-b border-[hsl(var(--border))] last:border-b-0;
+  }
+  
+  .data-table tbody tr:hover {
+    @apply bg-[hsl(var(--muted))]/30;
+  }
+  
+  /* Enhanced form controls */
+  .form-control {
+    @apply flex h-11 w-full rounded-lg border border-input bg-background px-4 py-2 text-sm;
+    @apply ring-offset-background transition-all duration-200;
+    @apply file:border-0 file:bg-transparent file:text-sm file:font-medium;
+    @apply placeholder:text-muted-foreground;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2;
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  }
+  
+  .form-control:focus {
+    border-color: hsl(var(--ring));
+    box-shadow: 0 0 0 2px hsl(var(--ring) / 0.1);
+  }
+  
+  /* Professional dropdown styling */
+  .dropdown-menu {
+    @apply bg-popover text-popover-foreground rounded-md border shadow-lg;
+    min-width: 200px;
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -2px rgb(0 0 0 / 0.05);
+  }
+  
+  /* Enhanced sidebar styling */
+  .sidebar-nav-item {
+    @apply flex items-center space-x-3 px-3 py-2 text-sm font-medium rounded-md transition-all duration-200;
+    @apply text-muted-foreground hover:text-foreground hover:bg-muted/50;
+  }
+  
+  .sidebar-nav-item.active {
+    @apply bg-primary/10 text-primary font-semibold;
+  }
+
+  /* Modern metrics cards */
+  .metrics-card {
+    @apply card-clean p-6 hover:shadow-card-hover;
+    transition: all 0.2s ease-in-out;
+  }
+  
+  .metrics-card:hover {
+    @apply scale-105;
+  }
+  
+  .metrics-value {
+    @apply text-3xl font-bold tracking-tight;
+  }
+  
+  .metrics-label {
+    @apply text-sm font-medium text-muted-foreground uppercase tracking-wider;
+  }
+  
+  .metrics-trend-up {
+    @apply text-success flex items-center space-x-1;
+  }
+  
+  .metrics-trend-down {
+    @apply text-destructive flex items-center space-x-1;
+  }
+  
+  .metrics-trend-neutral {
+    @apply text-muted-foreground flex items-center space-x-1;
+  }
+
+  /* Modern progress bars */
+  .progress-bar {
+    @apply w-full bg-muted rounded-full h-2 overflow-hidden;
+  }
+  
+  .progress-bar-fill {
+    @apply h-full transition-all duration-300 ease-out rounded-full;
+  }
+  
+  .progress-good {
+    @apply bg-gradient-success;
+  }
+  
+  .progress-medium {
+    @apply bg-gradient-warm;
+  }
+  
+  .progress-critical {
+    @apply bg-destructive;
+  }
+
+  /* Dashboard grid layouts */
+  .dashboard-grid {
+    @apply grid gap-6;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  }
+  
+  .dashboard-card {
+    @apply card-clean hover:card-elevated transition-all duration-200;
+  }
+
+  /* Modern login/signup forms */
+  .auth-card {
+    @apply card-clean max-w-md w-full p-8 shadow-card-lg;
+    backdrop-filter: blur(10px);
+  }
+  
+  .auth-header {
+    @apply text-center mb-8;
+  }
+  
+  .auth-title {
+    @apply text-2xl font-bold tracking-tight mb-2;
+  }
+  
+  .auth-subtitle {
+    @apply text-muted-foreground;
+  }
+  
+  /* Visual hierarchy helpers */
+  .heading-primary {
+    @apply text-3xl font-bold tracking-tight text-foreground;
+  }
+  
+  .heading-secondary {
+    @apply text-2xl font-semibold text-foreground;
+  }
+  
+  .text-subtle {
+    @apply text-muted-foreground text-sm;
+  }
+  
+  .divider {
+    @apply border-t border-[hsl(var(--border))] my-6;
+  }
+}

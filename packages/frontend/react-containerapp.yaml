@@ -1,0 +1,22 @@
+properties:
+  template:
+    containers:
+    - image: mcr.microsoft.com/azure-functions/node:4-node20-appservice
+      name: grc-frontend-simple
+      env:
+      - name: NODE_ENV
+        value: production
+      - name: PORT
+        value: "8080"
+      command: ["/bin/sh"]
+      args: ["-c", "cat > package.json << 'EOF'\n{\n  \"name\": \"grc-frontend-react\",\n  \"version\": \"1.0.0\",\n  \"main\": \"server.js\",\n  \"dependencies\": {\n    \"express\": \"^4.19.2\"\n  },\n  \"scripts\": {\n    \"start\": \"node server.js\"\n  }\n}\nEOF\ncat > server.js << 'EOF'\nconst express = require('express');\nconst path = require('path');\nconst app = express();\napp.use(express.static('.', {\n  setHeaders: (res, filepath) => {\n    if (filepath.endsWith('.js')) {\n      res.setHeader('Content-Type', 'application/javascript');\n    }\n    if (filepath.endsWith('.css')) {\n      res.setHeader('Content-Type', 'text/css');\n    }\n  }\n}));\napp.get('/health', (req, res) => {\n  res.json({ status: 'healthy', service: 'React Frontend', timestamp: new Date().toISOString() });\n});\napp.get('*', (req, res) => {\n  res.sendFile(path.join(__dirname, 'index.html'));\n});\nconst port = process.env.PORT || 8080;\napp.listen(port, () => {\n  console.log('React Frontend running on port ' + port);\n});\nEOF\ncat > index.html << 'EOF'\n<!doctype html>\n<html lang=\"en\">\n  <head>\n    <script type=\"module\">import { injectIntoGlobalHook } from \"/@react-refresh\";injectIntoGlobalHook(window);window.$RefreshReg$ = () => {};window.$RefreshSig$ = () => (type) => type;</script>\n    <meta charset=\"UTF-8\" />\n    <link rel=\"icon\" type=\"image/svg+xml\" href=\"/vite.svg\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n    <title>RMX AI Hub - Multi-Tenant SaaS Platform</title>\n    <meta name=\"description\" content=\"Multi-Tenant SaaS Platform for AI-Powered GRC Extensions\" />\n    <style>:root{--background: 0 0% 99.5%; --foreground: 220 13% 20%; --primary: 221 83% 53%; --primary-foreground: 0 0% 100%;}</style>\n  </head>\n  <body>\n    <div id=\"root\">\n      <div style=\"display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:system-ui;\">\n        <div style=\"text-align:center;\">\n          <h1 style=\"color:#4f46e5;margin-bottom:20px;\">🚀 GRC AI Platform</h1>\n          <p style=\"color:#6b7280;margin-bottom:20px;\">Loading React Application...</p>\n          <div style=\"width:40px;height:40px;border:4px solid #e5e7eb;border-top:4px solid #4f46e5;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto;\"></div>\n          <style>@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}</style>\n          <p style=\"color:#9ca3af;font-size:14px;margin-top:20px;\">Azure Container Apps • Australia Southeast</p>\n        </div>\n      </div>\n    </div>\n    <script>console.log('GRC AI Platform - React Loading...');</script>\n  </body>\n</html>\nEOF\nnpm install && node server.js"]
+      resources:
+        cpu: 0.5
+        memory: 1Gi
+    scale:
+      minReplicas: 1
+      maxReplicas: 3
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080

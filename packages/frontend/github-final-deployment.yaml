@@ -1,0 +1,172 @@
+properties:
+  template:
+    containers:
+    - image: mcr.microsoft.com/azure-functions/node:4-node20-appservice
+      name: grc-frontend-simple
+      env:
+      - name: NODE_ENV
+        value: production
+      - name: PORT
+        value: "8080"
+      - name: VITE_API_BASE_URL
+        value: "https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1"
+      command: ["/bin/bash"]
+      args:
+        - -c
+        - |
+          set -e
+          echo "🚀 Building GRC React Frontend from GitHub Repository (FINAL VERSION)..."
+
+          # Install required tools
+          apt-get update -qq
+          apt-get install -y git curl
+
+          # Clone repository
+          echo "📥 Cloning repository..."
+          git clone https://github.com/adamengleby/grc-ai-platform.git /tmp/repo
+
+          # Detect frontend structure
+          echo "🔍 Checking for frontend structure..."
+          if [ -d "/tmp/repo/packages/frontend" ]; then
+            echo "Found packages/frontend structure"
+            cd /tmp/repo/packages/frontend
+          elif [ -f "/tmp/repo/vite.config.ts" ]; then
+            echo "Found root frontend structure"
+            cd /tmp/repo
+          else
+            echo "ERROR: No frontend structure found"
+            exit 1
+          fi
+
+          echo "📁 Working directory: $(pwd)"
+          ls -la
+
+          # Install dependencies and build
+          echo "📦 Installing dependencies..."
+          # First install shared package dependencies
+          cd /tmp/repo/packages/shared
+          if [ -f "package.json" ]; then
+            echo "Installing shared package dependencies..."
+            npm install
+          fi
+
+          # Then install frontend dependencies
+          cd /tmp/repo/packages/frontend
+          echo "Installing frontend dependencies..."
+          npm install
+
+          # Force install required build dependencies
+          echo "Installing required build dependencies..."
+          npm install --save-dev vite@^5.0.8 @vitejs/plugin-react typescript
+
+          # Verify vite is installed
+          echo "Checking vite installation..."
+          npm list vite
+
+          echo "🏗️ Building React application..."
+          VITE_API_BASE_URL="https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1" ./node_modules/.bin/vite build
+
+          echo "✅ Build completed. Verifying output..."
+          ls -la dist/
+
+          # Set up production app
+          echo "🚚 Setting up production server..."
+          mkdir -p /app
+          cp -r dist/* /app/
+          cd /app
+
+          # Create package.json
+          cat > package.json << 'PACKAGE_EOF'
+          {
+            "name": "grc-frontend-production",
+            "version": "1.0.0",
+            "main": "server.js",
+            "dependencies": {
+              "express": "^4.19.2"
+            }
+          }
+          PACKAGE_EOF
+
+          npm install
+
+          # Create Express server
+          cat > server.js << 'SERVER_EOF'
+          const express = require('express');
+          const path = require('path');
+          const app = express();
+
+          // Security headers
+          app.use((req, res, next) => {
+            res.header('X-Frame-Options', 'DENY');
+            res.header('X-Content-Type-Options', 'nosniff');
+            res.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+            res.header('X-XSS-Protection', '1; mode=block');
+            next();
+          });
+
+          // Serve static files
+          app.use(express.static('.', {
+            maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
+            etag: true,
+            lastModified: true
+          }));
+
+          // Health check
+          app.get('/health', (req, res) => {
+            res.json({
+              status: 'healthy',
+              service: 'GRC React Frontend - GitHub Production Build (FINAL)',
+              version: '2025-09-27-github-final-build',
+              timestamp: new Date().toISOString(),
+              build: 'production-react-github-final',
+              features: {
+                'actual-react-app': true,
+                'mcp-validation-removed': true,
+                'github-adaptive-structure': true,
+                'production-build': true
+              }
+            });
+          });
+
+          // API health proxy
+          app.get('/api/health', async (req, res) => {
+            try {
+              const fetch = await import('node-fetch').then(m => m.default || m);
+              const response = await fetch('https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/health');
+              const data = await response.json();
+              res.json({ frontend: 'healthy', backend: data });
+            } catch (error) {
+              res.status(500).json({ frontend: 'healthy', backend: 'error', error: error.message });
+            }
+          });
+
+          // SPA fallback
+          app.get('*', (req, res) => {
+            res.sendFile(path.join(__dirname, 'index.html'));
+          });
+
+          const port = process.env.PORT || 8080;
+          app.listen(port, () => {
+            console.log('🚀 GRC React Frontend (GitHub FINAL Production Build) on port', port);
+            console.log('🔗 API Base URL:', process.env.VITE_API_BASE_URL);
+            console.log('✅ Proper React application with MCP validation removed');
+            console.log('📁 Built from GitHub repository with adaptive structure detection');
+            console.log('🎯 Features: Full React UI, Agent creation without MCP');
+          });
+          SERVER_EOF
+
+          echo "🧹 Cleaning up build artifacts..."
+          rm -rf /tmp/repo
+
+          echo "🎉 Starting GitHub FINAL React production frontend..."
+          node server.js
+      resources:
+        cpu: 1.25
+        memory: 2.5Gi
+    scale:
+      minReplicas: 1
+      maxReplicas: 3
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080

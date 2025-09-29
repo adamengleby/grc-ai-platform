@@ -1,0 +1,24 @@
+properties:
+  template:
+    containers:
+    - image: mcr.microsoft.com/azure-functions/node:4-node20-appservice
+      name: grc-frontend-simple
+      env:
+      - name: NODE_ENV
+        value: production
+      - name: PORT
+        value: "8080"
+      - name: VITE_API_BASE_URL
+        value: "https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1"
+      command: ["/bin/sh"]
+      args: ["-c", "echo 'Building proper GRC React Frontend...' && apt-get update && apt-get install -y git curl && echo 'Cloning repository...' && git clone https://github.com/adamengleby/grc-ai-platform.git /tmp/repo && echo 'Setting up build environment...' && cd /tmp/repo/packages/frontend && npm install && echo 'Building React application...' && npm run build && echo 'Setting up production server...' && cd / && mkdir -p app && cp -r /tmp/repo/packages/frontend/dist/* /app/ && cd /app && cat > package.json << 'EOF'\n{\n  \"name\": \"grc-frontend-production\",\n  \"version\": \"1.0.0\",\n  \"main\": \"server.js\",\n  \"dependencies\": {\n    \"express\": \"^4.19.2\"\n  }\n}\nEOF\nnpm install && cat > server.js << 'EOF'\nconst express = require('express');\nconst path = require('path');\nconst app = express();\n\n// Security headers\napp.use((req, res, next) => {\n  res.header('X-Frame-Options', 'DENY');\n  res.header('X-Content-Type-Options', 'nosniff');\n  res.header('Referrer-Policy', 'strict-origin-when-cross-origin');\n  res.header('X-XSS-Protection', '1; mode=block');\n  next();\n});\n\n// Serve static files with proper caching\napp.use(express.static('.', { \n  maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,\n  etag: true,\n  lastModified: true\n}));\n\n// Health check\napp.get('/health', (req, res) => {\n  res.json({\n    status: 'healthy',\n    service: 'GRC React Frontend - Full Application',\n    version: '2025-09-25-react-proper',\n    timestamp: new Date().toISOString(),\n    build: 'production-react-build',\n    features: {\n      'mcp-validation-removed': true,\n      'full-react-app': true,\n      'agent-creation': true,\n      'multi-tenant': true\n    }\n  });\n});\n\n// API health proxy for development\napp.get('/api/health', async (req, res) => {\n  try {\n    const fetch = await import('node-fetch').then(m => m.default || m);\n    const response = await fetch('https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/health');\n    const data = await response.json();\n    res.json({ frontend: 'healthy', backend: data });\n  } catch (error) {\n    res.status(500).json({ frontend: 'healthy', backend: 'error', error: error.message });\n  }\n});\n\n// SPA fallback - serve index.html for all routes\napp.get('*', (req, res) => {\n  res.sendFile(path.join(__dirname, 'index.html'));\n});\n\nconst port = process.env.PORT || 8080;\napp.listen(port, () => {\n  console.log('🚀 GRC Frontend (Full React App - MCP Validation Removed) on port', port);\n  console.log('🔗 API Base URL:', process.env.VITE_API_BASE_URL);\n  console.log('✅ Full React application deployed with no MCP validation requirement');\n  console.log('📱 Features: Agent creation, Multi-tenant support, Full UI');\n});\nEOF\necho 'Cleaning up...' && rm -rf /tmp/repo && echo 'Starting production React frontend...' && node server.js"]
+      resources:
+        cpu: 1.0
+        memory: 2Gi
+    scale:
+      minReplicas: 1
+      maxReplicas: 3
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080

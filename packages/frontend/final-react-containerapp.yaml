@@ -1,0 +1,240 @@
+properties:
+  template:
+    containers:
+    - image: mcr.microsoft.com/azure-functions/node:4-node20-appservice
+      name: grc-frontend-production
+      env:
+      - name: NODE_ENV
+        value: production
+      - name: PORT
+        value: "8080"
+      - name: VITE_API_BASE_URL
+        value: "https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1"
+      command: ["/bin/sh"]
+      args: ["-c", "
+        echo '🚀 GRC AI Platform - Production React Deployment' &&
+
+        # Create package.json for production server
+        cat > package.json << 'PACKAGE_EOF'
+{
+  \"name\": \"grc-frontend-production\",
+  \"version\": \"1.0.0\",
+  \"main\": \"server.js\",
+  \"dependencies\": {
+    \"express\": \"^4.19.2\",
+    \"compression\": \"^1.7.4\"
+  },
+  \"scripts\": {
+    \"start\": \"node server.js\"
+  }
+}
+PACKAGE_EOF
+
+        # Install production dependencies
+        echo '📦 Installing production dependencies...' &&
+        npm install &&
+
+        # Create production server
+        cat > server.js << 'SERVER_EOF'
+const express = require('express');
+const path = require('path');
+const compression = require('compression');
+
+const app = express();
+
+// Enable compression
+app.use(compression());
+
+// Serve static files with proper caching and MIME types
+app.use(express.static('.', {
+  setHeaders: (res, filepath) => {
+    if (filepath.endsWith('.js')) {
+      res.setHeader('Content-Type', 'application/javascript');
+    }
+    if (filepath.endsWith('.css')) {
+      res.setHeader('Content-Type', 'text/css');
+    }
+    if (filepath.endsWith('.json')) {
+      res.setHeader('Content-Type', 'application/json');
+    }
+    if (filepath.includes('/assets/')) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000');
+    }
+  }
+}));
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    service: 'GRC AI Platform - React Frontend (PRODUCTION)',
+    timestamp: new Date().toISOString(),
+    environment: 'Azure Container Apps',
+    region: 'Australia Southeast',
+    backend: process.env.VITE_API_BASE_URL
+  });
+});
+
+// Handle React Router
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+const port = process.env.PORT || 8080;
+app.listen(port, () => {
+  console.log('🚀 GRC AI Platform Frontend - PRODUCTION');
+  console.log('📍 Port:', port);
+  console.log('🔗 Backend:', process.env.VITE_API_BASE_URL);
+  console.log('✅ Production React app ready');
+});
+SERVER_EOF
+
+        # Create React app structure with actual content
+        echo '📁 Setting up React application...' &&
+
+        # Create index.html with the actual React app structure
+        cat > index.html << 'HTML_EOF'
+<!DOCTYPE html>
+<html lang=\"en\">
+  <head>
+    <meta charset=\"UTF-8\" />
+    <link rel=\"icon\" type=\"image/svg+xml\" href=\"/vite.svg\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
+    <title>RMX AI Hub - Multi-Tenant SaaS Platform</title>
+    <meta name=\"description\" content=\"Multi-Tenant SaaS Platform for AI-Powered GRC Extensions\" />
+    <style>
+      :root {
+        --background: 0 0% 99.5%;
+        --foreground: 220 13% 20%;
+        --card: 0 0% 100%;
+        --card-foreground: 220 13% 20%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 220 13% 20%;
+        --primary: 221 83% 53%;
+        --primary-foreground: 0 0% 100%;
+        --primary-light: 221 83% 70%;
+        --primary-dark: 221 83% 40%;
+        --secondary: 220 14% 96%;
+        --secondary-foreground: 220 13% 20%;
+        --secondary-dark: 220 13% 28%;
+        --muted: 220 14% 96%;
+        --muted-foreground: 220 9% 46%;
+        --accent: 173 80% 40%;
+        --accent-foreground: 0 0% 100%;
+        --accent-light: 173 80% 55%;
+        --success: 160 84% 39%;
+        --success-foreground: 0 0% 100%;
+        --success-light: 160 84% 50%;
+        --warning: 45 93% 58%;
+        --warning-foreground: 0 0% 100%;
+        --warning-light: 45 93% 70%;
+        --destructive: 0 72% 51%;
+        --destructive-foreground: 0 0% 100%;
+        --destructive-light: 0 72% 65%;
+        --border: 220 13% 91%;
+        --input: 220 13% 91%;
+        --ring: 221 83% 53%;
+        --radius: 0.75rem;
+        --chat-user-bg: 221 83% 53%;
+        --chat-user-fg: 0 0% 100%;
+        --chat-agent-bg: 0 0% 100%;
+        --chat-agent-fg: 220 13% 20%;
+        --chat-border: 220 13% 91%;
+        --status-good: 160 84% 39%;
+        --status-medium: 45 93% 58%;
+        --status-critical: 0 72% 51%;
+        --status-pending: 220 9% 46%;
+        --status-compliant: 160 84% 39%;
+        --status-at-risk: 45 93% 58%;
+        --status-non-compliant: 0 72% 51%;
+        --gradient-blue-start: 221 83% 53%;
+        --gradient-blue-end: 173 80% 40%;
+        --gradient-success-start: 160 84% 39%;
+        --gradient-success-end: 173 80% 40%;
+        --gradient-warm-start: 45 93% 58%;
+        --gradient-warm-end: 0 72% 51%;
+        --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+        --shadow-base: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px 0 rgb(0 0 0 / 0.06);
+        --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -1px rgb(0 0 0 / 0.06);
+        --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -2px rgb(0 0 0 / 0.05);
+      }
+
+      .dark {
+        --background: 220 13% 8%;
+        --foreground: 210 40% 98%;
+        --card: 220 13% 10%;
+        --card-foreground: 210 40% 98%;
+        --popover: 220 13% 10%;
+        --popover-foreground: 210 40% 98%;
+        --primary: 221 83% 60%;
+        --primary-foreground: 0 0% 100%;
+        --primary-light: 221 83% 75%;
+        --primary-dark: 221 83% 45%;
+        --secondary: 220 13% 15%;
+        --secondary-foreground: 210 40% 98%;
+        --secondary-dark: 220 13% 8%;
+        --muted: 220 13% 15%;
+        --muted-foreground: 215 20% 65%;
+        --accent: 173 80% 50%;
+        --accent-foreground: 0 0% 100%;
+        --accent-light: 173 80% 65%;
+        --success: 160 84% 50%;
+        --success-foreground: 0 0% 100%;
+        --success-light: 160 84% 65%;
+        --warning: 45 93% 65%;
+        --warning-foreground: 220 13% 8%;
+        --warning-light: 45 93% 75%;
+        --destructive: 0 72% 60%;
+        --destructive-foreground: 0 0% 100%;
+        --destructive-light: 0 72% 75%;
+        --border: 220 13% 20%;
+        --input: 220 13% 20%;
+        --ring: 221 83% 60%;
+        --chat-user-bg: 221 83% 60%;
+        --chat-user-fg: 0 0% 100%;
+        --chat-agent-bg: 220 13% 15%;
+        --chat-agent-fg: 210 40% 98%;
+        --chat-border: 220 13% 20%;
+        --status-good: 160 84% 50%;
+        --status-medium: 45 93% 65%;
+        --status-critical: 0 72% 60%;
+        --status-pending: 215 20% 65%;
+        --status-compliant: 160 84% 50%;
+        --status-at-risk: 45 93% 65%;
+        --status-non-compliant: 0 72% 60%;
+      }
+    </style>
+    <script type=\"module\" crossorigin src=\"/assets/index-BrS90hKE.js\"></script>
+    <link rel=\"stylesheet\" crossorigin href=\"/assets/index-SeoJpoEb.css\">
+  </head>
+  <body>
+    <div id=\"root\"></div>
+  </body>
+</html>
+HTML_EOF
+
+        # Create assets directory and the real React bundle
+        mkdir -p assets &&
+
+        # Since we can't embed the large JS file inline, we'll use wget to download it from GitHub
+        echo '📥 Downloading React application assets from GitHub...' &&
+        curl -L -o assets/index-BrS90hKE.js 'https://raw.githubusercontent.com/adamengleby/grc-ai-platform/master/packages/frontend/dist/assets/index-BrS90hKE.js' &&
+        curl -L -o assets/index-SeoJpoEb.css 'https://raw.githubusercontent.com/adamengleby/grc-ai-platform/master/packages/frontend/dist/assets/index-SeoJpoEb.css' &&
+
+        echo '✅ Assets downloaded. Verifying...' &&
+        ls -la assets/ &&
+
+        echo '🚀 Starting production React frontend...' &&
+        node server.js
+        "]
+      resources:
+        cpu: 1.0
+        memory: 2Gi
+    scale:
+      minReplicas: 1
+      maxReplicas: 5
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080
+      allowInsecure: false
