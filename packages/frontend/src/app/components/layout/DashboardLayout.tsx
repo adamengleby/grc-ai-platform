@@ -72,6 +72,16 @@ export const DashboardLayout: React.FC = () => {
             <Outlet />
           </div>
         </main>
+
+        {/* Version Footer */}
+        <footer className="border-t bg-background/80 backdrop-blur-sm">
+          <div className="px-6 py-2">
+            <p className="text-xs text-muted-foreground text-center">
+              GRC Platform Frontend v1.0.0-fixed-deployment-{new Date().toISOString().split('T')[0]}
+              {process.env.NODE_ENV === 'development' && ' (Development)'}
+            </p>
+          </div>
+        </footer>
       </div>
     </div>
   );
