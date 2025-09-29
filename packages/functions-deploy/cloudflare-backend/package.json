@@ -1,0 +1,20 @@
+{
+  "name": "grc-backend-cloudflare",
+  "version": "1.0.0",
+  "description": "GRC Backend API on Cloudflare Workers - Australian Edge",
+  "main": "worker.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "deploy:production": "wrangler deploy --env production",
+    "tail": "wrangler tail",
+    "preview": "wrangler preview"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

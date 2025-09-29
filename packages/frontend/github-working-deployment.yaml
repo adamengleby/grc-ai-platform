@@ -1,0 +1,144 @@
+properties:
+  template:
+    containers:
+    - image: mcr.microsoft.com/azure-functions/node:4-node20-appservice
+      name: grc-frontend-simple
+      env:
+      - name: NODE_ENV
+        value: production
+      - name: PORT
+        value: "8080"
+      - name: VITE_API_BASE_URL
+        value: "https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1"
+      command: ["/bin/bash"]
+      args:
+        - -c
+        - |
+          set -e
+          echo "🚀 Building GRC React Frontend from GitHub Repository (WORKING VERSION)..."
+
+          # Install required tools
+          apt-get update -qq
+          apt-get install -y git curl
+
+          # Clone repository
+          echo "📥 Cloning repository..."
+          git clone https://github.com/adamengleby/grc-ai-platform.git /tmp/repo
+          cd /tmp/repo
+
+          echo "📁 Repository structure:"
+          ls -la
+
+          echo "📦 Installing root dependencies (monorepo setup)..."
+          npm install
+
+          echo "🏗️ Building frontend using workspace command..."
+          VITE_API_BASE_URL="https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1" npm run build --workspace=@grc-ai-platform/frontend
+
+          echo "✅ Build completed. Checking output..."
+          ls -la packages/frontend/dist/
+
+          # Set up production app
+          echo "🚚 Setting up production server..."
+          mkdir -p /app
+          cp -r packages/frontend/dist/* /app/
+          cd /app
+
+          echo "📄 Production files:"
+          ls -la
+
+          # Create package.json
+          cat > package.json << 'PACKAGE_EOF'
+          {
+            "name": "grc-frontend-production",
+            "version": "1.0.0",
+            "main": "server.js",
+            "dependencies": {
+              "express": "^4.19.2"
+            }
+          }
+          PACKAGE_EOF
+
+          npm install
+
+          # Create Express server
+          cat > server.js << 'SERVER_EOF'
+          const express = require('express');
+          const path = require('path');
+          const app = express();
+
+          // Security headers
+          app.use((req, res, next) => {
+            res.header('X-Frame-Options', 'DENY');
+            res.header('X-Content-Type-Options', 'nosniff');
+            res.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+            res.header('X-XSS-Protection', '1; mode=block');
+            next();
+          });
+
+          // Serve static files
+          app.use(express.static('.', {
+            maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
+            etag: true,
+            lastModified: true
+          }));
+
+          // Health check
+          app.get('/health', (req, res) => {
+            res.json({
+              status: 'healthy',
+              service: 'GRC React Frontend - GitHub Production Build (WORKING)',
+              version: '2025-09-27-github-working-build',
+              timestamp: new Date().toISOString(),
+              build: 'production-react-github-working',
+              features: {
+                'actual-react-app': true,
+                'mcp-validation-removed': true,
+                'github-monorepo-build': true,
+                'production-build': true
+              }
+            });
+          });
+
+          // API health proxy
+          app.get('/api/health', async (req, res) => {
+            try {
+              const fetch = await import('node-fetch').then(m => m.default || m);
+              const response = await fetch('https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/health');
+              const data = await response.json();
+              res.json({ frontend: 'healthy', backend: data });
+            } catch (error) {
+              res.status(500).json({ frontend: 'healthy', backend: 'error', error: error.message });
+            }
+          });
+
+          // SPA fallback
+          app.get('*', (req, res) => {
+            res.sendFile(path.join(__dirname, 'index.html'));
+          });
+
+          const port = process.env.PORT || 8080;
+          app.listen(port, () => {
+            console.log('🚀 GRC React Frontend (GitHub WORKING Production Build) on port', port);
+            console.log('🔗 API Base URL:', process.env.VITE_API_BASE_URL);
+            console.log('✅ Proper React application with MCP validation removed');
+            console.log('📁 Built from GitHub repository using workspace commands');
+            console.log('🎯 Features: Full React UI, Agent creation without MCP');
+          });
+          SERVER_EOF
+
+          echo "🧹 Cleaning up build artifacts..."
+          rm -rf /tmp/repo
+
+          echo "🎉 Starting GitHub WORKING React production frontend..."
+          node server.js
+      resources:
+        cpu: 1.25
+        memory: 2.5Gi
+    scale:
+      minReplicas: 1
+      maxReplicas: 3
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080

@@ -1,0 +1,135 @@
+location: australiasoutheast
+name: grc-frontend-simple
+resourceGroup: rg-grc-ai-platform-syd
+type: Microsoft.App/containerApps
+properties:
+  environmentId: /subscriptions/2e6b5431-6d83-4072-8ccc-86af69cf22b0/resourceGroups/rg-grc-ai-platform-syd/providers/Microsoft.App/managedEnvironments/grc-containerapp-env
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080
+  template:
+    containers:
+    - name: grc-frontend-simple
+      image: mcr.microsoft.com/azure-functions/node:4-node20-appservice
+      resources:
+        cpu: 1.0
+        memory: 2Gi
+        ephemeralStorage: 4Gi
+      env:
+      - name: NODE_ENV
+        value: "production"
+      - name: PORT
+        value: "8080"
+      - name: VITE_API_BASE_URL
+        value: "https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1"
+      command:
+      - /bin/bash
+      args:
+      - -c
+      - |
+        set -e
+        echo "🚀 SIMPLIFIED GRC Frontend Deployment - Working Around GitHub Structure Issues..."
+
+        # Install required tools
+        apt-get update -qq
+        apt-get install -y git curl
+
+        # Clone and check repository structure
+        echo "📥 Cloning repository..."
+        git clone https://github.com/adamengleby/grc-ai-platform.git /tmp/repo
+        cd /tmp/repo
+
+        echo "🔍 Repository structure investigation:"
+        ls -la
+
+        # Check if packages directory exists at root
+        if [ -d "packages" ]; then
+          echo "✅ Found packages directory at root"
+          ls -la packages/
+
+          # Check for frontend in packages
+          if [ -d "packages/frontend" ]; then
+            echo "✅ Found packages/frontend directory"
+            cd packages/frontend
+            ls -la
+
+            if [ -f "package.json" ]; then
+              echo "✅ Found package.json in packages/frontend"
+            else
+              echo "❌ No package.json in packages/frontend"
+              exit 1
+            fi
+          else
+            echo "❌ No packages/frontend directory found"
+            exit 1
+          fi
+        else
+          echo "❌ No packages directory found in repository"
+          echo "📁 Available directories:"
+          ls -la
+          exit 1
+        fi
+
+        # If we get here, the structure is correct - proceed with build
+        echo "📦 Installing dependencies..."
+        NODE_ENV=development npm install
+
+        echo "🔧 Building React application..."
+        VITE_API_BASE_URL="https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1" npm run build
+
+        echo "✅ Build completed. Setting up production server..."
+        mkdir -p /app
+        cp -r dist/* /app/
+        cd /app
+
+        # Create minimal package.json
+        cat > package.json << 'EOF'
+        {
+          "name": "grc-frontend-working",
+          "version": "1.0.0",
+          "main": "server.js",
+          "dependencies": {
+            "express": "^4.19.2"
+          }
+        }
+        EOF
+
+        npm install
+
+        # Create production server
+        cat > server.js << 'EOF'
+        const express = require('express');
+        const path = require('path');
+        const app = express();
+
+        app.use(express.static('.'));
+
+        app.get('/health', (req, res) => {
+          res.json({
+            status: 'healthy',
+            service: 'GRC Frontend - WORKING DEPLOYMENT',
+            version: '2025-09-29-working',
+            timestamp: new Date().toISOString()
+          });
+        });
+
+        app.get('*', (req, res) => {
+          res.sendFile(path.join(__dirname, 'index.html'));
+        });
+
+        const port = process.env.PORT || 8080;
+        app.listen(port, () => {
+          console.log('🚀 GRC Frontend (WORKING) running on port', port);
+          console.log('🔗 API Base URL:', process.env.VITE_API_BASE_URL);
+        });
+        EOF
+
+        echo "🧹 Cleaning up..."
+        rm -rf /tmp/repo
+
+        echo "🎉 Starting production frontend server..."
+        node server.js
+    scale:
+      minReplicas: 1
+      maxReplicas: 2

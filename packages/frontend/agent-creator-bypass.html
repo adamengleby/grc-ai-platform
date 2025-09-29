@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GRC Agent Creator - No MCP Required</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; margin-bottom: 20px; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 5px; font-weight: 600; color: #555; }
+        input, textarea, select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        textarea { height: 100px; resize: vertical; }
+        button {
+            background: #667eea;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+        }
+        button:hover { background: #5a6fd8; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .success { background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; margin-bottom: 20px; }
+        .error { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; margin-bottom: 20px; }
+        .info { background: #d1ecf1; color: #0c5460; padding: 10px; border-radius: 5px; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 Create Agent Without MCP</h1>
+
+        <div class="info">
+            <strong>✅ Backend Ready:</strong> Agent creation works without MCP servers required.
+            <br><strong>⚠️ Frontend Issue:</strong> Production UI has old validation - use this tool instead.
+        </div>
+
+        <form id="agentForm">
+            <div class="form-group">
+                <label for="name">Agent Name *</label>
+                <input type="text" id="name" required placeholder="e.g., GRC Assistant">
+            </div>
+
+            <div class="form-group">
+                <label for="description">Description</label>
+                <textarea id="description" placeholder="Brief description of the agent's purpose"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="systemPrompt">System Prompt</label>
+                <textarea id="systemPrompt" placeholder="Instructions for how the agent should behave (optional - will use default)"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="tenantId">Tenant (User)</label>
+                <select id="tenantId">
+                    <option value="a1b2c3d4-e5f6-4a8b-9c0d-1e2f3a4b5c6d">Sarah Chen (ACME Corp)</option>
+                    <option value="f1234567-89ab-4cde-f012-3456789abcde">David Smith (FinTech)</option>
+                </select>
+            </div>
+
+            <button type="submit" id="submitBtn">Create Agent (No MCP Required)</button>
+        </form>
+
+        <div id="message"></div>
+    </div>
+
+    <script>
+        document.getElementById('agentForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const submitBtn = document.getElementById('submitBtn');
+            const messageDiv = document.getElementById('message');
+
+            // Get form data
+            const name = document.getElementById('name').value;
+            const description = document.getElementById('description').value;
+            const systemPrompt = document.getElementById('systemPrompt').value;
+            const tenantId = document.getElementById('tenantId').value;
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Creating Agent...';
+            messageDiv.innerHTML = '';
+
+            try {
+                const response = await fetch('https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1/simple-agents', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-tenant-id': tenantId
+                    },
+                    body: JSON.stringify({
+                        name: name,
+                        description: description,
+                        system_prompt: systemPrompt || 'You are a helpful AI assistant for GRC tasks.',
+                        enabledMcpServers: [] // Empty - no MCP required!
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    messageDiv.innerHTML = `
+                        <div class="success">
+                            ✅ <strong>Agent Created Successfully!</strong><br>
+                            ID: ${result.data.id}<br>
+                            Name: ${result.data.name}<br>
+                            MCP Servers: None (as requested)<br>
+                            Status: ${result.data.is_enabled ? 'Enabled' : 'Disabled'}
+                        </div>
+                    `;
+                    document.getElementById('agentForm').reset();
+                } else {
+                    throw new Error(result.error || 'Failed to create agent');
+                }
+
+            } catch (error) {
+                console.error('Error creating agent:', error);
+                messageDiv.innerHTML = `
+                    <div class="error">
+                        ❌ <strong>Error:</strong> ${error.message}
+                    </div>
+                `;
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Create Agent (No MCP Required)';
+            }
+        });
+    </script>
+</body>
+</html>
