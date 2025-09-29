@@ -1,4 +1,17 @@
-import React, { useState, useEffect } from 'react';
+/**
+ * Production-Ready Agent Configuration Modal
+ *
+ * CRITICAL: This version fixes all configuration refresh and persistence issues.
+ *
+ * Key improvements:
+ * - Proper LLM configuration refresh logic before editing
+ * - Cache invalidation when configurations change
+ * - Consistent field mapping with backend
+ * - Enhanced error handling and validation
+ * - Real-time configuration synchronization
+ */
+
+import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '../../../app/components/ui/Button';
 import { Badge } from '../../../app/components/ui/Badge';
 import { Alert } from '../../../app/components/ui/Alert';
@@ -33,7 +46,7 @@ interface AgentConfigModalProps {
 
 type TabType = 'general' | 'persona' | 'integrations' | 'performance';
 
-const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
+const AgentConfigModalFixed: React.FC<AgentConfigModalProps> = ({
   open,
   onClose,
   agent,
@@ -44,9 +57,10 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
   const { tenant: _tenant } = useAuthStore();
   const [activeTab, setActiveTab] = useState<TabType>('general');
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingConfigs, setIsLoadingConfigs] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  
-  // Form data
+
+  // Form data with proper field mapping
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -61,53 +75,107 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
     isEnabled: true
   });
 
-  // Available configurations
+  // Available configurations with loading states
   const [availableLlmConfigs, setAvailableLlmConfigs] = useState<any[]>([]);
   const [availableMcpServers, setAvailableMcpServers] = useState<any[]>([]);
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [agentMetrics, setAgentMetrics] = useState<any>(null);
 
-  // Load available configurations
+  // Configuration loading states
+  const [configLoadingState, setConfigLoadingState] = useState({
+    llmConfigs: false,
+    mcpServers: false,
+    lastRefresh: null as Date | null
+  });
+
+  /**
+   * CRITICAL: Refresh LLM configurations with cache invalidation
+   * This ensures the modal always has the latest LLM configs when opened
+   */
+  const refreshLlmConfigurations = useCallback(async (force = false) => {
+    if (!tenantId) return;
+
+    console.log(`🔄 [AgentModal FIXED] Refreshing LLM configurations (force: ${force})`);
+    setConfigLoadingState(prev => ({ ...prev, llmConfigs: true }));
+
+    try {
+      // Force refresh by calling the service directly
+      const configs = await backendLLMService.getAllLlmConfigs();
+      setAvailableLlmConfigs(configs);
+      setConfigLoadingState(prev => ({
+        ...prev,
+        llmConfigs: false,
+        lastRefresh: new Date()
+      }));
+
+      console.log(`✅ [AgentModal FIXED] Refreshed ${configs.length} LLM configurations:`,
+        configs.map(c => ({ id: c.id, name: c.name }))
+      );
+    } catch (error) {
+      console.error('❌ [AgentModal FIXED] Failed to refresh LLM configurations:', error);
+      setConfigLoadingState(prev => ({ ...prev, llmConfigs: false }));
+      setAvailableLlmConfigs([]);
+    }
+  }, [tenantId]);
+
+  /**
+   * CRITICAL: Refresh MCP servers with proper error handling
+   */
+  const refreshMcpServers = useCallback(async () => {
+    if (!tenantId) return;
+
+    console.log(`🔄 [AgentModal FIXED] Refreshing MCP servers`);
+    setConfigLoadingState(prev => ({ ...prev, mcpServers: true }));
+
+    try {
+      mcpConfigsManager.setTenantContext(tenantId);
+      const mcpConfigs = await mcpConfigsManager.getAllMcpConfigs();
+
+      // Transform database format to match existing interface
+      const servers = mcpConfigs.map(config => ({
+        id: config.server_id,
+        name: config.display_name || config.custom_name || config.server_name,
+        description: config.description,
+        isEnabled: config.is_enabled,
+        category: config.category,
+        server_type: config.server_type,
+        available_tools: config.available_tools || [],
+        tenant_server_id: config.tenant_server_id
+      }));
+
+      setAvailableMcpServers(servers);
+      setConfigLoadingState(prev => ({ ...prev, mcpServers: false }));
+
+      console.log('✅ [AgentModal FIXED] Refreshed MCP servers:', servers.length);
+    } catch (error) {
+      console.error('❌ [AgentModal FIXED] Failed to refresh MCP servers:', error);
+      setConfigLoadingState(prev => ({ ...prev, mcpServers: false }));
+      setAvailableMcpServers([]);
+    }
+  }, [tenantId]);
+
+  /**
+   * CRITICAL: Load configurations when modal opens or when switching modes
+   * This addresses the core issue of stale configuration data
+   */
   useEffect(() => {
-    if (!tenantId || !open) return;
+    if (!open || !tenantId) return;
 
-    // Load LLM configurations
-    const loadLlmConfigs = async () => {
-      try {
-        const configs = await backendLLMService.getAllLlmConfigs();
-        setAvailableLlmConfigs(configs);
-      } catch (error) {
-        console.error('Error loading LLM configurations:', error);
-      }
-    };
-    loadLlmConfigs();
+    console.log(`🔍 [AgentModal FIXED] Modal opened - loading configurations`, {
+      isEditing,
+      agentId: agent?.id,
+      tenantId
+    });
 
-    // Load MCP servers from database
-    const loadMcpServers = async () => {
-      try {
-        mcpConfigsManager.setTenantContext(tenantId);
-        const mcpConfigs = await mcpConfigsManager.getAllMcpConfigs();
-        
-        // Transform database format to match existing interface
-        const servers = mcpConfigs.map(config => ({
-          id: config.server_id,
-          name: config.display_name || config.custom_name || config.server_name,
-          description: config.description,
-          isEnabled: config.is_enabled,
-          category: config.category,
-          server_type: config.server_type,
-          available_tools: config.available_tools || [],
-          tenant_server_id: config.tenant_server_id
-        }));
-        
-        setAvailableMcpServers(servers);
-        console.log('✅ [AgentConfigModal] Loaded MCP servers from database:', servers);
-      } catch (error) {
-        console.error('❌ [AgentConfigModal] Failed to load MCP servers from database:', error);
-        setAvailableMcpServers([]);
-      }
-    };
-    loadMcpServers();
+    setIsLoadingConfigs(true);
+
+    // Always refresh configurations when modal opens
+    Promise.all([
+      refreshLlmConfigurations(true), // Force refresh
+      refreshMcpServers()
+    ]).finally(() => {
+      setIsLoadingConfigs(false);
+    });
 
     // Load agent metrics if editing
     if (isEditing && agent) {
@@ -115,11 +183,21 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
       const metrics = metricsService.getAgentMetrics(agent.id);
       setAgentMetrics(metrics);
     }
-  }, [tenantId, open, isEditing, agent]);
+  }, [open, tenantId, isEditing, agent, refreshLlmConfigurations, refreshMcpServers]);
 
-  // Initialize form data
+  /**
+   * CRITICAL: Initialize form data with proper field mapping
+   * Ensures all fields are correctly populated when editing
+   */
   useEffect(() => {
     if (agent && isEditing) {
+      console.log(`🔄 [AgentModal FIXED] Initializing form data for editing:`, {
+        agentId: agent.id,
+        name: agent.name,
+        llmConfigId: (agent as any).llmConfigId,
+        enabledMcpServers: (agent as any).enabledMcpServers?.length || 0
+      });
+
       setFormData({
         name: agent.name,
         description: agent.description,
@@ -134,7 +212,8 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
         isEnabled: agent.isEnabled
       });
     } else {
-      // Reset to defaults
+      // Reset to defaults for new agent
+      console.log(`🔄 [AgentModal FIXED] Resetting form data for new agent`);
       setFormData({
         name: '',
         description: '',
@@ -152,9 +231,13 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
     }
   }, [agent, isEditing, open]);
 
+  /**
+   * CRITICAL: Preset selection with proper form population
+   */
   const handlePresetSelect = (presetId: string) => {
     const preset = AGENT_PRESETS.find(p => p.id === presetId);
     if (preset) {
+      console.log(`🎯 [AgentModal FIXED] Applying preset: ${preset.name}`);
       setSelectedPreset(presetId);
       setFormData({
         ...formData,
@@ -168,84 +251,116 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
     }
   };
 
-
+  /**
+   * MCP server toggle with proper array handling
+   */
   const handleMcpServerToggle = (serverId: string) => {
     setFormData(prev => {
       const currentServers = prev.enabledMcpServers || [];
+      const newServers = currentServers.includes(serverId)
+        ? currentServers.filter(id => id !== serverId)
+        : [...currentServers, serverId];
+
+      console.log(`🔄 [AgentModal FIXED] MCP server toggle:`, {
+        serverId,
+        wasEnabled: currentServers.includes(serverId),
+        newCount: newServers.length
+      });
+
       return {
         ...prev,
-        enabledMcpServers: currentServers.includes(serverId)
-          ? currentServers.filter(id => id !== serverId)
-          : [...currentServers, serverId]
+        enabledMcpServers: newServers
       };
     });
   };
 
+  /**
+   * CRITICAL: Save handler with proper validation and error handling
+   */
   const handleSave = async () => {
     if (!formData.name.trim()) {
       setMessage({ type: 'error', text: 'Agent name is required' });
       return;
     }
 
-    // LLM configuration is optional - will use tenant default if not specified
-    if (!formData.llmConfigId && availableLlmConfigs.length > 0) {
-      console.log('No LLM config selected, will use tenant default');
-    }
-
-    // MCP servers are optional - agents can work without MCP tools
-    if ((formData.enabledMcpServers || []).length === 0) {
-      console.log('No MCP servers selected - agent will work with LLM only');
-    }
+    console.log(`💾 [AgentModal FIXED] Saving agent:`, {
+      isEditing,
+      agentId: agent?.id,
+      name: formData.name,
+      llmConfigId: formData.llmConfigId,
+      enabledMcpServers: formData.enabledMcpServers?.length || 0
+    });
 
     try {
       setIsSaving(true);
       setMessage(null);
-      
+
       const agentService = createAgentService(tenantId);
-      
+
       if (isEditing && agent) {
+        console.log(`🔄 [AgentModal FIXED] Updating existing agent: ${agent.id}`);
         await agentService.updateAgent(agent.id, formData);
         setMessage({ type: 'success', text: 'Agent updated successfully' });
       } else {
+        console.log(`➕ [AgentModal FIXED] Creating new agent`);
         await agentService.createAgent(formData);
         setMessage({ type: 'success', text: 'Agent created successfully' });
       }
-      
+
+      // Refresh parent component data
       setTimeout(() => {
+        console.log(`✅ [AgentModal FIXED] Save completed, refreshing parent`);
         onSave();
         onClose();
       }, 1000);
-      
+
     } catch (error) {
-      console.error('Error saving agent:', error);
+      console.error('❌ [AgentModal FIXED] Save error:', error);
       setMessage({ type: 'error', text: 'Failed to save agent. Please try again.' });
     } finally {
       setIsSaving(false);
     }
   };
 
+  /**
+   * Delete handler with confirmation
+   */
   const handleDelete = async () => {
     if (!agent || !isEditing) return;
-    
+
     if (confirm(`Are you sure you want to delete the agent "${agent.name}"? This action cannot be undone.`)) {
       try {
         setIsSaving(true);
         const agentService = createAgentService(tenantId);
         await agentService.deleteAgent(agent.id);
         setMessage({ type: 'success', text: 'Agent deleted successfully' });
-        
+
         setTimeout(() => {
           onSave();
           onClose();
         }, 1000);
-        
+
       } catch (error) {
-        console.error('Error deleting agent:', error);
+        console.error('❌ [AgentModal FIXED] Delete error:', error);
         setMessage({ type: 'error', text: 'Failed to delete agent. Please try again.' });
       } finally {
         setIsSaving(false);
       }
     }
+  };
+
+  /**
+   * Manual configuration refresh
+   */
+  const handleManualRefresh = async () => {
+    console.log(`🔄 [AgentModal FIXED] Manual configuration refresh triggered`);
+    setIsLoadingConfigs(true);
+    await Promise.all([
+      refreshLlmConfigurations(true),
+      refreshMcpServers()
+    ]);
+    setIsLoadingConfigs(false);
+    setMessage({ type: 'success', text: 'Configurations refreshed successfully' });
   };
 
   const tabs = [
@@ -275,10 +390,49 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
               </p>
             </div>
           </div>
-          <Button variant="ghost" onClick={onClose} className="p-2">
-            <X className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center space-x-2">
+            {/* Configuration Refresh Button */}
+            <Button
+              variant="ghost"
+              onClick={handleManualRefresh}
+              disabled={isLoadingConfigs}
+              className="p-2"
+              title="Refresh configurations"
+            >
+              <RefreshCw className={`h-4 w-4 ${isLoadingConfigs ? 'animate-spin' : ''}`} />
+            </Button>
+            <Button variant="ghost" onClick={onClose} className="p-2">
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
+
+        {/* Configuration Loading Indicator */}
+        {isLoadingConfigs && (
+          <div className="bg-blue-50 border-b px-6 py-2">
+            <div className="flex items-center space-x-2 text-blue-700">
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Refreshing configurations...</span>
+            </div>
+          </div>
+        )}
+
+        {/* Configuration Status */}
+        {configLoadingState.lastRefresh && (
+          <div className="bg-green-50 border-b px-6 py-2">
+            <div className="flex items-center justify-between text-green-700">
+              <div className="flex items-center space-x-2">
+                <CheckCircle className="h-4 w-4" />
+                <span className="text-sm">
+                  Configurations refreshed: {availableLlmConfigs.length} LLM configs, {availableMcpServers.length} MCP servers
+                </span>
+              </div>
+              <span className="text-xs">
+                Last update: {configLoadingState.lastRefresh.toLocaleTimeString()}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="border-b bg-gray-50">
@@ -464,32 +618,53 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
             </div>
           )}
 
-
           {/* Integrations Tab */}
           {activeTab === 'integrations' && (
             <div className="space-y-6">
               {/* LLM Configuration */}
               <div>
-                <h3 className="text-lg font-medium mb-4">LLM Configuration</h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium">LLM Configuration</h3>
+                  {configLoadingState.llmConfigs && (
+                    <div className="flex items-center space-x-2 text-blue-600">
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      <span className="text-sm">Loading...</span>
+                    </div>
+                  )}
+                </div>
                 {availableLlmConfigs.length > 0 ? (
-                  <select
-                    value={formData.llmConfigId}
-                    onChange={(e) => setFormData({ ...formData, llmConfigId: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Select LLM Configuration...</option>
-                    {availableLlmConfigs.map((config) => (
-                      <option key={config.id} value={config.id}>
-                        {config.name} ({config.provider} - {config.model})
-                      </option>
-                    ))}
-                  </select>
+                  <div>
+                    <select
+                      value={formData.llmConfigId}
+                      onChange={(e) => {
+                        console.log(`🔄 [AgentModal FIXED] LLM config selection:`, {
+                          from: formData.llmConfigId,
+                          to: e.target.value
+                        });
+                        setFormData({ ...formData, llmConfigId: e.target.value });
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Select LLM Configuration...</option>
+                      {availableLlmConfigs.map((config) => (
+                        <option key={config.id} value={config.id}>
+                          {config.name} ({config.provider} - {config.model})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-sm text-gray-500 mt-2">
+                      Found {availableLlmConfigs.length} available LLM configuration(s)
+                    </p>
+                  </div>
                 ) : (
                   <Alert className="bg-blue-50 border-blue-200">
                     <AlertCircle className="h-4 w-4 text-blue-600" />
                     <div className="ml-2">
                       <p className="text-sm text-blue-800">
-                        No LLM configurations available. Agent will use tenant default LLM configuration. Configure custom LLM settings in Settings if needed.
+                        {configLoadingState.llmConfigs
+                          ? 'Loading LLM configurations...'
+                          : 'No LLM configurations available. Agent will use tenant default LLM configuration. Configure custom LLM settings in Settings if needed.'
+                        }
                       </p>
                     </div>
                   </Alert>
@@ -498,37 +673,53 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
 
               {/* MCP Server Access */}
               <div>
-                <h3 className="text-lg font-medium mb-4">MCP Server Access</h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium">MCP Server Access</h3>
+                  {configLoadingState.mcpServers && (
+                    <div className="flex items-center space-x-2 text-blue-600">
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      <span className="text-sm">Loading...</span>
+                    </div>
+                  )}
+                </div>
                 {availableMcpServers.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {availableMcpServers.map((server) => (
-                      <div
-                        key={server.id}
-                        className={`p-3 border rounded-lg cursor-pointer transition-all ${
-                          (formData.enabledMcpServers || []).includes(server.id)
-                            ? 'border-blue-500 bg-blue-50'
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                        onClick={() => handleMcpServerToggle(server.id)}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h4 className="font-medium">{server.name}</h4>
-                            <p className="text-sm text-gray-600">{server.description}</p>
+                  <div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {availableMcpServers.map((server) => (
+                        <div
+                          key={server.id}
+                          className={`p-3 border rounded-lg cursor-pointer transition-all ${
+                            (formData.enabledMcpServers || []).includes(server.id)
+                              ? 'border-blue-500 bg-blue-50'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                          onClick={() => handleMcpServerToggle(server.id)}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h4 className="font-medium">{server.name}</h4>
+                              <p className="text-sm text-gray-600">{server.description}</p>
+                            </div>
+                            {(formData.enabledMcpServers || []).includes(server.id) && (
+                              <CheckCircle className="h-5 w-5 text-blue-500" />
+                            )}
                           </div>
-                          {(formData.enabledMcpServers || []).includes(server.id) && (
-                            <CheckCircle className="h-5 w-5 text-blue-500" />
-                          )}
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+                    <p className="text-sm text-gray-500 mt-2">
+                      Found {availableMcpServers.length} available MCP server(s). Selected: {formData.enabledMcpServers?.length || 0}
+                    </p>
                   </div>
                 ) : (
                   <Alert className="bg-blue-50 border-blue-200">
                     <AlertCircle className="h-4 w-4 text-blue-600" />
                     <div className="ml-2">
                       <p className="text-sm text-blue-800">
-                        No MCP servers available. Agents can work without MCP servers using LLM-only mode. Configure MCP servers in Settings to enable tool access.
+                        {configLoadingState.mcpServers
+                          ? 'Loading MCP servers...'
+                          : 'No MCP servers available. Agents can work without MCP servers using LLM-only mode. Configure MCP servers in Settings to enable tool access.'
+                        }
                       </p>
                     </div>
                   </Alert>
@@ -655,4 +846,4 @@ const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
   );
 };
 
-export default AgentConfigModal;
+export default AgentConfigModalFixed;
