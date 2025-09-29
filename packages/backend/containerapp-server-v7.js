@@ -64,10 +64,12 @@ function getDatabase() {
 
 // Health check endpoint
 app.get('/health', async (req, res) => {
+  const currentTime = new Date();
   const healthStatus = {
     status: 'healthy',
     service: 'GRC AI Platform Backend with Database',
-    timestamp: new Date().toISOString(),
+    version: `2025-09-29-backend-with-timestamp-${currentTime.toISOString().split('T')[0]} ${currentTime.toISOString().split('T')[1].split('.')[0]}`,
+    timestamp: currentTime.toISOString(),
     environment: 'Azure Container Apps',
     database: {
       type: 'PostgreSQL',
