@@ -40,11 +40,11 @@ export const getBackendApiUrl = (): string => {
 
   if (isDev) {
     console.log('📍 Using development API URL');
-    return 'http://localhost:3005/api/v1';
+    return 'http://localhost:8080/api/v1';
   }
 
   // Fallback to Container Apps backend
-  const fallbackUrl = 'https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1';
+  const fallbackUrl = 'https://grc-ai-backend.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1';
   console.log('📍 Using fallback Container Apps backend URL:', fallbackUrl);
   return fallbackUrl;
 };
