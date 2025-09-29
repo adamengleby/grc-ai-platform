@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Outlet, Navigate } from 'react-router-dom';
 import { useAuthStore } from '@/app/store/auth';
 import { useDashboardStore } from '@/app/store/dashboard';
@@ -13,6 +13,7 @@ import { Loader2 } from 'lucide-react';
 export const DashboardLayout: React.FC = () => {
   const { isAuthenticated, isLoading, isInitialized, user, tenant } = useAuthStore();
   const { loadDashboardData, sidebarCollapsed } = useDashboardStore();
+  const [backendVersion, setBackendVersion] = useState<string>('loading...');
 
   // Don't auto-refresh auth in dashboard layout - this should only happen in App.tsx
   // The redirect to login will happen if not authenticated
@@ -24,6 +25,22 @@ export const DashboardLayout: React.FC = () => {
     }
   }, [tenant?.id, isAuthenticated, loadDashboardData]);
 
+  // Fetch backend version for footer
+  useEffect(() => {
+    const fetchBackendVersion = async () => {
+      try {
+        const backendBaseUrl = import.meta.env.DEV
+          ? 'http://localhost:8080'
+          : 'https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io';
+        const response = await fetch(`${backendBaseUrl}/health`);
+        const data = await response.json();
+        setBackendVersion(data.version || 'unknown');
+      } catch (error) {
+        setBackendVersion('unavailable');
+      }
+    };
+    fetchBackendVersion();
+  }, []);
 
   // Wait for auth initialization before making decisions
   if (!isInitialized) {
@@ -73,6 +90,16 @@ export const DashboardLayout: React.FC = () => {
             <Outlet />
           </div>
         </main>
+
+        {/* Version Footer */}
+        <footer className="border-t bg-background/80 backdrop-blur-sm">
+          <div className="px-6 py-2">
+            <p className="text-xs text-muted-foreground text-center">
+              Frontend v1.1.0-fix-{new Date().toISOString().split('T')[0]} {new Date().toISOString().split('T')[1].split('.')[0]} | Backend {backendVersion}
+              {import.meta.env.DEV && ' (Development)'}
+            </p>
+          </div>
+        </footer>
       </div>
     </div>
   );

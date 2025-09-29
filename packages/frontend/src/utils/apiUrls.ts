@@ -44,7 +44,7 @@ export const getBackendApiUrl = (): string => {
   }
 
   // Fallback to Container Apps backend
-  const fallbackUrl = 'https://grc-ai-backend.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1';
+  const fallbackUrl = 'https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1';
   console.log('📍 Using fallback Container Apps backend URL:', fallbackUrl);
   return fallbackUrl;
 };
