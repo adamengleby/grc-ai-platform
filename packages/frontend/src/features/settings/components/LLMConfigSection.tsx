@@ -69,9 +69,11 @@ export default function LLMConfigSection({
     }
   };
 
-  const handleEditLlmConfig = (configId: string) => {
+  const handleEditLlmConfig = async (configId: string) => {
     console.log('Edit button clicked for config ID:', configId);
     console.log('Available configs:', llmConfigs.map(c => ({ id: c.id, name: c.name })));
+    // Refresh configs to get latest data before editing
+    await loadLlmConfigs();
     setEditModalOpen(configId);
   };
 
@@ -367,6 +369,7 @@ export default function LLMConfigSection({
         const configToEdit = llmConfigs.find(c => c.id === editModalOpen);
         console.log('Edit modal rendering. editModalOpen:', editModalOpen);
         console.log('configToEdit found:', configToEdit);
+        console.log('configToEdit apiKey:', configToEdit?.apiKey);
         return configToEdit ? (
           <AddLlmConfigModal
             isOpen={!!editModalOpen}
