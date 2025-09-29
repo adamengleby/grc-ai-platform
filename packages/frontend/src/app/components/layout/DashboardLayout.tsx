@@ -1,10 +1,11 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Outlet, Navigate } from 'react-router-dom';
 import { useAuthStore } from '@/app/store/auth';
 import { useDashboardStore } from '@/app/store/dashboard';
 import { DashboardSidebar } from './DashboardSidebar';
 import { DashboardHeader } from './DashboardHeader';
 import { Loader2 } from 'lucide-react';
+import { buildApiUrl } from '@/utils/apiUrls';
 
 /**
  * Main dashboard layout component that wraps all authenticated pages
@@ -13,6 +14,7 @@ import { Loader2 } from 'lucide-react';
 export const DashboardLayout: React.FC = () => {
   const { isAuthenticated, isLoading, isInitialized, user, tenant } = useAuthStore();
   const { loadDashboardData, sidebarCollapsed } = useDashboardStore();
+  const [backendVersion, setBackendVersion] = useState<string>('loading...');
 
   // Don't auto-refresh auth in dashboard layout - this should only happen in App.tsx
   // The redirect to login will happen if not authenticated
@@ -23,6 +25,20 @@ export const DashboardLayout: React.FC = () => {
       loadDashboardData(tenant.id);
     }
   }, [tenant?.id, isAuthenticated, loadDashboardData]);
+
+  // Fetch backend version
+  useEffect(() => {
+    const fetchBackendVersion = async () => {
+      try {
+        const response = await fetch(buildApiUrl('health'));
+        const data = await response.json();
+        setBackendVersion(data.version || 'unknown');
+      } catch (error) {
+        setBackendVersion('unavailable');
+      }
+    };
+    fetchBackendVersion();
+  }, []);
 
   // Wait for auth initialization before making decisions
   if (!isInitialized) {
@@ -77,7 +93,7 @@ export const DashboardLayout: React.FC = () => {
         <footer className="border-t bg-background/80 backdrop-blur-sm">
           <div className="px-6 py-2">
             <p className="text-xs text-muted-foreground text-center">
-              GRC Platform Frontend v1.0.0-fixed-deployment-{new Date().toISOString().split('T')[0]}
+              Frontend v1.0.2-api-fixes-{new Date().toISOString().split('T')[0]} {new Date().toISOString().split('T')[1].split('.')[0]} | Backend {backendVersion}
               {process.env.NODE_ENV === 'development' && ' (Development)'}
             </p>
           </div>

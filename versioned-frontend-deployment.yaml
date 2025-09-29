@@ -1,0 +1,144 @@
+location: australiasoutheast
+name: grc-frontend-simple
+resourceGroup: rg-grc-ai-platform-syd
+type: Microsoft.App/containerApps
+properties:
+  environmentId: /subscriptions/2e6b5431-6d83-4072-8ccc-86af69cf22b0/resourceGroups/rg-grc-ai-platform-syd/providers/Microsoft.App/managedEnvironments/grc-containerapp-env
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080
+  template:
+    containers:
+    - name: grc-frontend-simple
+      image: mcr.microsoft.com/azure-functions/node:4-node20-appservice
+      resources:
+        cpu: 1.0
+        memory: 2Gi
+        ephemeralStorage: 4Gi
+      env:
+      - name: NODE_ENV
+        value: "production"
+      - name: PORT
+        value: "8080"
+      - name: VITE_API_BASE_URL
+        value: "https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1"
+      command:
+      - /bin/bash
+      args:
+      - -c
+      - |
+        set -e
+        echo "🚀 GRC Frontend v1.0.2 - API URL Fixes + Version with Time..."
+
+        # Install required tools
+        apt-get update -qq
+        apt-get install -y git curl
+
+        # Clone latest code with version updates
+        echo "📥 Cloning latest code with version updates..."
+        git clone https://github.com/adamengleby/grc-ai-platform.git /tmp/repo
+        cd /tmp/repo
+
+        echo "📋 Latest commit:"
+        git log -1 --oneline
+
+        cd packages/frontend
+
+        echo "🔍 Verifying version footer update..."
+        if grep -q "v1.0.2-api-fixes" src/app/components/layout/DashboardLayout.tsx; then
+          echo "✅ Version footer updated to v1.0.2 with time"
+        else
+          echo "❌ Version footer not updated"
+        fi
+
+        echo "📦 Installing dependencies..."
+        NODE_ENV=development npm install
+
+        echo "🔧 Building React application v1.0.2..."
+        echo "API Base URL: $VITE_API_BASE_URL"
+
+        # Build with explicit environment
+        VITE_API_BASE_URL="https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1" npm run build
+
+        echo "✅ Build completed."
+        ls -la dist/
+
+        # Set up production server
+        echo "🚚 Setting up production server..."
+        mkdir -p /app
+        cp -r dist/* /app/
+        cd /app
+
+        # Create production package.json
+        cat > package.json << 'EOF'
+        {
+          "name": "grc-frontend-versioned",
+          "version": "1.0.2",
+          "main": "server.js",
+          "dependencies": {
+            "express": "^4.19.2"
+          }
+        }
+        EOF
+
+        npm install
+
+        # Create Express server
+        cat > server.js << 'EOF'
+        const express = require('express');
+        const path = require('path');
+        const app = express();
+
+        // Log requests
+        app.use((req, res, next) => {
+          console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
+          next();
+        });
+
+        // Serve static files
+        app.use(express.static('.'));
+
+        // Health check with version
+        app.get('/health', (req, res) => {
+          res.json({
+            status: 'healthy',
+            service: 'GRC Frontend - v1.0.2 API URL FIXES',
+            version: '1.0.2-api-url-fixes-with-time',
+            timestamp: new Date().toISOString(),
+            apiBaseUrl: process.env.VITE_API_BASE_URL,
+            fixes: [
+              'API URL configuration standardized',
+              'Version footer with date and time',
+              'All services using consistent URLs',
+              'backendAgentService fixed (localhost port + buildApiUrl)',
+              'All old production URLs updated'
+            ]
+          });
+        });
+
+        // SPA fallback
+        app.get('*', (req, res) => {
+          res.sendFile(path.join(__dirname, 'index.html'));
+        });
+
+        const port = process.env.PORT || 8080;
+        app.listen(port, () => {
+          console.log('🚀 GRC Frontend v1.0.2 (API FIXES + VERSION) running on port', port);
+          console.log('🔗 API Base URL:', process.env.VITE_API_BASE_URL);
+          console.log('✅ v1.0.2 FIXES DEPLOYED:');
+          console.log('  ✅ Version footer shows date + time');
+          console.log('  ✅ All API URLs standardized');
+          console.log('  ✅ Console 404 errors should be resolved');
+          console.log('  ✅ LLM config loading works (backend compatible)');
+        });
+        EOF
+
+        echo "🧹 Cleaning up..."
+        rm -rf /tmp/repo
+
+        echo "🎉 Starting GRC Frontend v1.0.2..."
+        node server.js
+    scale:
+      minReplicas: 1
+      maxReplicas: 2
