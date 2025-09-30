@@ -10,6 +10,7 @@ import simpleAgentsRouter from './simpleAgents';
 import simpleCredentialsRouter from './simpleCredentials';
 import simpleLLMConfigsRouter from './simpleLLMConfigs';
 import simpleMCPConfigsRouter from './simpleMCPConfigs';
+import enhancedChatRouter from './enhancedChat';
 // Temporarily disabled due to winston Console error
 // import tenantManagementRouter from './tenantManagement';
 // import samlAuthRouter from './samlAuth';
@@ -98,6 +99,9 @@ apiRouter.use('/simple-agents', simpleAgentsRouter);
 apiRouter.use('/simple-credentials', simpleCredentialsRouter);
 apiRouter.use('/simple-llm-configs', simpleLLMConfigsRouter);
 apiRouter.use('/simple-mcp-configs', simpleMCPConfigsRouter);
+
+// Mount enhanced chat routes
+apiRouter.use('/enhanced-chat', enhancedChatRouter);
 
 // Temporarily disabled routes due to dependency issues
 // Mount tenant management routes

@@ -1,6 +1,7 @@
 import { OpenAI } from 'openai';
 import { Anthropic } from '@anthropic-ai/sdk';
 import { MCPServerManager, MCPTool } from './MCPServerManager.js';
+import { LLMConfigService, LLMConfiguration } from '../llmConfigService.js';
 
 export interface LLMConfig {
   provider: 'openai' | 'anthropic' | 'azure' | 'local';
@@ -9,6 +10,8 @@ export interface LLMConfig {
   temperature: number;
   maxTokens: number;
   apiKey?: string;
+  configId?: string;
+  name?: string;
 }
 
 export interface ProcessingContext {
@@ -44,45 +47,64 @@ export interface ProcessingResult {
 export class LLMOrchestrator {
   private openaiClient?: OpenAI;
   private anthropicClient?: Anthropic;
-  private primaryConfig: LLMConfig;
-  private fallbackConfig: LLMConfig;
+  private llmConfigService: LLMConfigService;
+  private availableConfigs: LLMConfiguration[] = [];
+  private tenantId?: string;
 
-  constructor() {
-    // Initialize with GRC-optimized configurations
-    this.primaryConfig = {
-      provider: 'openai',
-      model: 'gpt-4',
-      temperature: 0.1, // Low temperature for precise GRC analysis
-      maxTokens: 2000,
-      apiKey: process.env.OPENAI_API_KEY
-    };
-
-    this.fallbackConfig = {
-      provider: 'anthropic',
-      model: 'claude-3-sonnet-20240229',
-      temperature: 0.1,
-      maxTokens: 2000,
-      apiKey: process.env.ANTHROPIC_API_KEY
-    };
-
-    this.initializeLLMClients();
+  constructor(tenantId?: string) {
+    this.tenantId = tenantId;
+    this.llmConfigService = new LLMConfigService();
   }
 
-  private initializeLLMClients(): void {
+  async loadLLMConfigurations(): Promise<void> {
     try {
-      if (this.primaryConfig.apiKey) {
-        this.openaiClient = new OpenAI({
-          apiKey: this.primaryConfig.apiKey
-        });
-      }
-
-      if (this.fallbackConfig.apiKey) {
-        this.anthropicClient = new Anthropic({
-          apiKey: this.fallbackConfig.apiKey
-        });
+      if (this.tenantId) {
+        this.availableConfigs = await this.llmConfigService.getLLMConfigsByTenant(this.tenantId);
+        console.log(`📋 Loaded ${this.availableConfigs.length} LLM configurations for tenant ${this.tenantId}`);
+      } else {
+        this.availableConfigs = await this.llmConfigService.getAllLLMConfigs();
+        console.log(`📋 Loaded ${this.availableConfigs.length} LLM configurations`);
       }
     } catch (error) {
-      console.warn('⚠️ LLM client initialization failed, using rule-based fallback');
+      console.error('Failed to load LLM configurations:', error);
+      this.availableConfigs = [];
+    }
+  }
+
+  private async initializeLLMClients(): Promise<void> {
+    try {
+      // Load configurations from database
+      await this.loadLLMConfigurations();
+
+      // Initialize OpenAI clients from configurations
+      for (const config of this.availableConfigs) {
+        if (config.provider === 'openai' && config.apiKey && config.isEnabled) {
+          this.openaiClient = new OpenAI({
+            apiKey: config.apiKey,
+            baseURL: config.endpoint || undefined
+          });
+          console.log(`🤖 Initialized OpenAI client: ${config.name}`);
+          break; // Use first available OpenAI config
+        }
+      }
+
+      // Initialize Anthropic clients from configurations
+      for (const config of this.availableConfigs) {
+        if (config.provider === 'anthropic' && config.apiKey && config.isEnabled) {
+          this.anthropicClient = new Anthropic({
+            apiKey: config.apiKey,
+            baseURL: config.endpoint || undefined
+          });
+          console.log(`🤖 Initialized Anthropic client: ${config.name}`);
+          break; // Use first available Anthropic config
+        }
+      }
+
+      if (!this.openaiClient && !this.anthropicClient) {
+        console.warn('⚠️ No LLM clients available, using rule-based fallback');
+      }
+    } catch (error) {
+      console.warn('⚠️ LLM client initialization failed, using rule-based fallback:', error);
     }
   }
 
@@ -90,6 +112,9 @@ export class LLMOrchestrator {
     console.log(`🤖 Enhanced GRC LLM Processing for user ${context.userId}`);
     console.log(`📊 Available tools: ${context.availableTools.length}`);
     console.log(`💬 Message: ${context.message.substring(0, 100)}...`);
+
+    // Initialize LLM clients with database configurations
+    await this.initializeLLMClients();
 
     try {
       // Analyze the request for GRC context
@@ -253,6 +278,15 @@ export class LLMOrchestrator {
   private async processWithOpenAI(context: ProcessingContext, grcAnalysis: any, toolResults: any[]): Promise<{response: string, provider: string}> {
     if (!this.openaiClient) throw new Error('OpenAI client not initialized');
 
+    // Find the OpenAI configuration being used
+    const openaiConfig = this.availableConfigs.find(config =>
+      config.provider === 'openai' && config.isEnabled
+    );
+
+    if (!openaiConfig) {
+      throw new Error('No OpenAI configuration found');
+    }
+
     const systemPrompt = `You are a GRC (Governance, Risk, and Compliance) expert AI assistant. You help with:
 
 - Risk assessments and calculations
@@ -267,23 +301,32 @@ Tool Results: ${JSON.stringify(toolResults)}
 Provide clear, actionable GRC guidance. Include specific recommendations and next steps.`;
 
     const completion = await this.openaiClient.chat.completions.create({
-      model: this.primaryConfig.model,
+      model: openaiConfig.model || 'gpt-4',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: context.message }
       ],
-      temperature: this.primaryConfig.temperature,
-      max_tokens: this.primaryConfig.maxTokens
+      temperature: openaiConfig.temperature || 0.7,
+      max_tokens: openaiConfig.maxTokens || 2000
     });
 
     return {
       response: completion.choices[0]?.message?.content || 'No response generated',
-      provider: 'OpenAI GPT-4'
+      provider: `OpenAI ${openaiConfig.model} (${openaiConfig.name})`
     };
   }
 
   private async processWithAnthropic(context: ProcessingContext, grcAnalysis: any, toolResults: any[]): Promise<{response: string, provider: string}> {
     if (!this.anthropicClient) throw new Error('Anthropic client not initialized');
+
+    // Find the Anthropic configuration being used
+    const anthropicConfig = this.availableConfigs.find(config =>
+      config.provider === 'anthropic' && config.isEnabled
+    );
+
+    if (!anthropicConfig) {
+      throw new Error('No Anthropic configuration found');
+    }
 
     const systemPrompt = `You are a GRC (Governance, Risk, and Compliance) expert AI assistant specializing in enterprise risk management and regulatory compliance.
 
@@ -293,9 +336,9 @@ Tool Results: ${JSON.stringify(toolResults)}
 Provide expert GRC guidance with specific, actionable recommendations.`;
 
     const completion = await this.anthropicClient.messages.create({
-      model: this.fallbackConfig.model,
-      max_tokens: this.fallbackConfig.maxTokens,
-      temperature: this.fallbackConfig.temperature,
+      model: anthropicConfig.model || 'claude-3-sonnet-20240229',
+      max_tokens: anthropicConfig.maxTokens || 2000,
+      temperature: anthropicConfig.temperature || 0.7,
       system: systemPrompt,
       messages: [
         { role: 'user', content: context.message }
@@ -309,7 +352,7 @@ Provide expert GRC guidance with specific, actionable recommendations.`;
 
     return {
       response: responseText || 'No response generated',
-      provider: 'Anthropic Claude'
+      provider: `Anthropic ${anthropicConfig.model} (${anthropicConfig.name})`
     };
   }
 
@@ -394,8 +437,27 @@ Provide expert GRC guidance with specific, actionable recommendations.`;
     };
   }
 
-  updateLLMConfig(config: Partial<LLMConfig>): void {
-    this.primaryConfig = { ...this.primaryConfig, ...config };
-    this.initializeLLMClients();
+  async updateLLMConfig(config: Partial<LLMConfig>): Promise<void> {
+    // Reload configurations from database
+    await this.loadLLMConfigurations();
+    // Reinitialize clients with new configurations
+    await this.initializeLLMClients();
+  }
+
+  getAvailableLLMConfigs(): LLMConfiguration[] {
+    return this.availableConfigs;
+  }
+
+  getActiveLLMProviders(): string[] {
+    const providers: string[] = [];
+    if (this.openaiClient) {
+      const config = this.availableConfigs.find(c => c.provider === 'openai' && c.isEnabled);
+      providers.push(`OpenAI (${config?.name || 'Unknown'})`);
+    }
+    if (this.anthropicClient) {
+      const config = this.availableConfigs.find(c => c.provider === 'anthropic' && c.isEnabled);
+      providers.push(`Anthropic (${config?.name || 'Unknown'})`);
+    }
+    return providers;
   }
 }

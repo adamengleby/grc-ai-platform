@@ -1,0 +1,10 @@
+{
+  "name": "mock-archer-api",
+  "version": "1.0.0",
+  "description": "Mock Archer GRC API for local development",
+  "main": "src/index.js",
+  "dependencies": {
+    "express": "^4.18.0",
+    "cors": "^2.8.5"
+  }
+}

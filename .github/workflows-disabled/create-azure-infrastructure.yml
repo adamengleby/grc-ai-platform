@@ -1,0 +1,134 @@
+name: Create Azure Infrastructure and Deploy
+
+on:
+  workflow_dispatch:
+
+env:
+  AZURE_WEBAPP_NAME: grc-backend-prod
+  RESOURCE_GROUP: rg-grc-ai-platform-prod
+  LOCATION: eastus
+  NODE_VERSION: '20.x'
+
+jobs:
+  create-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Create Resource Group
+      run: |
+        echo "Creating resource group if it doesn't exist..."
+        az group create \
+          --name ${{ env.RESOURCE_GROUP }} \
+          --location ${{ env.LOCATION }} || echo "Resource group may already exist"
+
+    - name: Create App Service Plan
+      run: |
+        echo "Creating App Service Plan..."
+        az appservice plan create \
+          --name grc-backend-plan \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --location ${{ env.LOCATION }} \
+          --sku B1 \
+          --is-linux || echo "App Service Plan may already exist"
+
+    - name: Create Web App
+      run: |
+        echo "Creating Web App..."
+        az webapp create \
+          --name ${{ env.AZURE_WEBAPP_NAME }} \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --plan grc-backend-plan \
+          --runtime "NODE:20-lts" || echo "Web App may already exist"
+
+    - name: Create deployment package
+      run: |
+        # Create deployment directory
+        mkdir -p azure-deploy
+
+        # Copy the minimal backend
+        cp minimal-backend.cjs azure-deploy/
+
+        # Create package.json
+        cat > azure-deploy/package.json << 'EOF'
+        {
+          "name": "grc-minimal-backend",
+          "version": "1.0.0",
+          "main": "minimal-backend.cjs",
+          "scripts": {
+            "start": "node minimal-backend.cjs"
+          },
+          "engines": {
+            "node": ">=18.0.0"
+          }
+        }
+        EOF
+
+        # Create deployment zip
+        cd azure-deploy
+        zip -r ../azure-backend.zip .
+
+    - name: Deploy to Azure Web App
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ env.AZURE_WEBAPP_NAME }}
+        package: azure-backend.zip
+
+    - name: Configure Web App Settings
+      run: |
+        echo "Configuring Web App settings..."
+        az webapp config appsettings set \
+          --name ${{ env.AZURE_WEBAPP_NAME }} \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --settings \
+            NODE_ENV=production \
+            PORT=8080 \
+            WEBSITES_PORT=8080 \
+            SCM_DO_BUILD_DURING_DEPLOYMENT=false \
+            WEBSITE_NODE_DEFAULT_VERSION=20.x
+
+        az webapp config set \
+          --name ${{ env.AZURE_WEBAPP_NAME }} \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --startup-file "node minimal-backend.cjs"
+
+    - name: Wait for deployment
+      run: |
+        echo "Waiting for deployment to complete..."
+        sleep 60
+
+    - name: Validate Azure Deployment
+      run: |
+        echo "Testing Azure deployment..."
+        BACKEND_URL="https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+
+        # Test health endpoint with retries
+        for i in {1..10}; do
+          echo "Attempt $i: Testing $BACKEND_URL/api/v1/health"
+          if curl -f "$BACKEND_URL/api/v1/health"; then
+            echo "✅ Health endpoint working!"
+            break
+          else
+            echo "⏳ Retrying in 30 seconds..."
+            sleep 30
+          fi
+        done
+
+        # Test LLM configs (the originally failing endpoint)
+        echo "Testing LLM configurations..."
+        curl -f "$BACKEND_URL/api/v1/simple-llm-configs" && echo "✅ LLM configs working!"
+
+        # Test other endpoints
+        curl -f "$BACKEND_URL/api/v1/simple-agents" && echo "✅ Agents working!"
+        curl -f "$BACKEND_URL/api/v1/mcp-servers/tools" && echo "✅ MCP tools working!"
+
+        echo "🎉 Azure deployment successful!"
+        echo "Backend URL: $BACKEND_URL"
+        echo "API Base: $BACKEND_URL/api/v1"

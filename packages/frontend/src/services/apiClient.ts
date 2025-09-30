@@ -971,6 +971,66 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Send enhanced chat message with LLM orchestration
+   */
+  async enhancedChat(request: {
+    message: string;
+    files?: File[];
+    grcContext?: {
+      frameworks?: string[];
+      tenant?: string;
+      role?: string;
+    };
+    userId?: string;
+    tenantId?: string;
+  }): Promise<{
+    response: string;
+    metadata: {
+      toolsUsed: string[];
+      reasoning: string;
+      confidence: number;
+      llmProvider: string;
+      grcAnalysis?: {
+        category?: string;
+        riskLevel?: string;
+        complianceFrameworks?: string[];
+        recommendations?: string[];
+      };
+    };
+  }> {
+    const response = await this.makeRequest<{ success: boolean; data: any }>('/enhanced-chat/process', 'POST', {
+      message: request.message,
+      files: request.files || [],
+      userId: request.userId || 'demo-user',
+      tenantId: request.tenantId || 'demo-tenant'
+    });
+    return response.data;
+  }
+
+  /**
+   * Get enhanced conversation history
+   */
+  async getEnhancedConversationHistory(userId: string, limit: number = 20): Promise<any[]> {
+    // Mock implementation for now - replace with actual backend endpoint when available
+    return [];
+  }
+
+  /**
+   * Search enhanced conversation memory
+   */
+  async searchEnhancedMemory(query: string, limit: number = 5): Promise<{
+    results: Array<{
+      id: string;
+      content: string;
+      timestamp: string;
+      relevance: number;
+    }>;
+  }> {
+    // Mock implementation for now - replace with actual backend endpoint when available
+    return { results: [] };
+  }
+
   // =====================================================
   // LEGACY CHAT & SESSION MANAGEMENT
   // =====================================================

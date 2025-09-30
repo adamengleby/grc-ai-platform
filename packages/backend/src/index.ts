@@ -5,7 +5,7 @@
 
 import express from 'express';
 import cors from 'cors';
-import enhancedChatRouter from './routes/enhanced/chat.js';
+import enhancedChatRouter from './routes/enhancedChat.js';
 
 const app = express();
 const port = process.env.PORT || 8080;
