@@ -31,8 +31,8 @@ export const DashboardLayout: React.FC = () => {
       try {
         const backendBaseUrl = import.meta.env.DEV
           ? 'http://localhost:8080'
-          : 'https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io';
-        const response = await fetch(`${backendBaseUrl}/health`);
+          : 'https://grc-backend.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io';
+        const response = await fetch(`${backendBaseUrl}/version`);
         const data = await response.json();
         setBackendVersion(data.version || 'unknown');
       } catch (error) {
@@ -95,7 +95,7 @@ export const DashboardLayout: React.FC = () => {
         <footer className="border-t bg-background/80 backdrop-blur-sm">
           <div className="px-6 py-2">
             <p className="text-xs text-muted-foreground text-center">
-              Frontend v1.1.0-fix-{new Date().toISOString().split('T')[0]} {new Date().toISOString().split('T')[1].split('.')[0]} | Backend {backendVersion}
+              Frontend v1.3.0-{new Date().toISOString().split('T')[0]} {new Date().toISOString().split('T')[1].split('.')[0]} | Backend {backendVersion}
               {import.meta.env.DEV && ' (Development)'}
             </p>
           </div>

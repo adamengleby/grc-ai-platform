@@ -62,15 +62,27 @@ function getDatabase() {
   return dbPool;
 }
 
-// Health check endpoint
+// Health check endpoint with enhanced version tracking
 app.get('/health', async (req, res) => {
   const currentTime = new Date();
   const healthStatus = {
     status: 'healthy',
-    service: 'GRC AI Platform Backend with Database',
-    version: `2025-09-29-backend-with-timestamp-${currentTime.toISOString().split('T')[0]} ${currentTime.toISOString().split('T')[1].split('.')[0]}`,
+    service: 'GRC AI Platform Backend',
+    version: `v1.3.0-${currentTime.toISOString().split('T')[0]} ${currentTime.toISOString().split('T')[1].split('.')[0]}`,
     timestamp: currentTime.toISOString(),
     environment: 'Azure Container Apps',
+    deployment: {
+      version: 'v1.3.0',
+      buildTime: currentTime.toISOString(),
+      containerName: process.env.CONTAINER_APP_NAME || 'grc-backend',
+      features: [
+        'Multi-tenant agent management',
+        'LLM configuration CRUD',
+        'PostgreSQL database integration',
+        'Version tracking and deployment monitoring',
+        'Clean URL support (no simple suffix)'
+      ]
+    },
     database: {
       type: 'PostgreSQL',
       host: process.env.POSTGRES_HOST,
@@ -90,6 +102,25 @@ app.get('/health', async (req, res) => {
   }
 
   res.json(healthStatus);
+});
+
+// Version endpoint for frontend footer integration
+app.get('/version', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+
+  const currentTime = new Date();
+  res.json({
+    version: `v1.3.0-${currentTime.toISOString().split('T')[0]} ${currentTime.toISOString().split('T')[1].split('.')[0]}`,
+    service: 'GRC Backend',
+    timestamp: currentTime.toISOString(),
+    deployment: {
+      version: 'v1.3.0',
+      containerName: process.env.CONTAINER_APP_NAME || 'grc-backend',
+      environment: 'Azure Container Apps'
+    }
+  });
 });
 
 // Schema deployment via GET (for testing)
@@ -1108,10 +1139,20 @@ app.post('/api/v1/database/deploy-schema', async (req, res) => {
   }
 });
 
-const port = process.env.PORT || 3005;
+const port = process.env.PORT || 8080;
 app.listen(port, () => {
-  console.log('🚀 GRC AI Platform Backend with Database Integration');
+  const currentTime = new Date();
+  const version = `v1.3.0-${currentTime.toISOString().split('T')[0]} ${currentTime.toISOString().split('T')[1].split('.')[0]}`;
+
+  console.log('🚀 GRC AI Platform Backend v1.3.0');
   console.log('📍 Port:', port);
   console.log('🗄️  Database:', process.env.POSTGRES_HOST);
-  console.log('✅ Backend ready with PostgreSQL');
+  console.log('📦 Version:', version);
+  console.log('🏷️  Features:');
+  console.log('    ✅ Multi-tenant agent management');
+  console.log('    ✅ LLM configuration CRUD');
+  console.log('    ✅ Version tracking and deployment monitoring');
+  console.log('    ✅ Clean URL support (no simple suffix)');
+  console.log('    ✅ PostgreSQL database integration');
+  console.log('✅ Backend ready with enhanced version tracking');
 });
