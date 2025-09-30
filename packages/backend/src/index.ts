@@ -5,6 +5,7 @@
 
 import express from 'express';
 import cors from 'cors';
+import enhancedChatRouter from './routes/enhanced/chat.js';
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -553,6 +554,9 @@ app.get('/api/v1/insights/health', (req, res) => {
   });
 });
 
+// Enhanced chat router
+app.use('/api/v1/enhanced', enhancedChatRouter);
+
 // Generic catch-all for API endpoints
 app.all('/api/v1/*', (req, res) => {
   res.status(404).json({
@@ -567,7 +571,12 @@ app.all('/api/v1/*', (req, res) => {
       'GET /api/v1/simple-mcp-configs',
       'GET /api/v1/mcp-servers/tools',
       'GET /api/v1/data-quality/health',
-      'GET /api/v1/insights/health'
+      'GET /api/v1/insights/health',
+      'POST /api/v1/enhanced/chat',
+      'GET /api/v1/enhanced/conversations/:userId',
+      'GET /api/v1/enhanced/memory/search',
+      'GET /api/v1/enhanced/tools',
+      'GET /api/v1/enhanced/health'
     ],
     timestamp: new Date().toISOString(),
     method: req.method,

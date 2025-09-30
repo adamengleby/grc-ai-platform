@@ -179,7 +179,13 @@ export class ApiClient {
 
     // Add body for non-GET requests
     if (options.body && method !== 'GET') {
-      requestOptions.body = JSON.stringify(options.body);
+      if (options.body instanceof FormData) {
+        // For FormData, don't stringify and remove Content-Type (browser will set it)
+        requestOptions.body = options.body;
+        delete headers['Content-Type'];
+      } else {
+        requestOptions.body = JSON.stringify(options.body);
+      }
     }
 
     try {
@@ -791,7 +797,182 @@ export class ApiClient {
   }
 
   // =====================================================
-  // CHAT & SESSION MANAGEMENT
+  // ENHANCED CHAT SYSTEM (v2.0)
+  // =====================================================
+
+  /**
+   * Enhanced GRC Chat with multi-LLM orchestration and file uploads
+   */
+  async enhancedChat(data: {
+    message: string;
+    files?: File[];
+    grcContext?: {
+      frameworks?: string[];
+      tenant?: string;
+      role?: string;
+    };
+  }): Promise<{
+    response: string;
+    metadata: {
+      toolsUsed: string[];
+      reasoning: string;
+      confidence: number;
+      llmProvider: string;
+      grcAnalysis: {
+        category: string;
+        riskLevel: string;
+        complianceFrameworks: string[];
+        recommendations: string[];
+      };
+      filesProcessed: number;
+      conversationLength: number;
+      serverStatus: Array<{
+        name: string;
+        status: string;
+        toolCount: number;
+      }>;
+      userContext: {
+        tenantId: string;
+        roles: string[];
+        permissions: any;
+      };
+    };
+    timestamp: string;
+  }> {
+    const formData = new FormData();
+    formData.append('message', data.message);
+
+    if (data.grcContext) {
+      formData.append('grcContext', JSON.stringify(data.grcContext));
+    }
+
+    if (data.files) {
+      data.files.forEach((file, index) => {
+        formData.append('attachments', file);
+      });
+    }
+
+    const response = await this.makeRequest<{
+      success: boolean;
+      data: any;
+      timestamp: string;
+    }>('/enhanced/chat', {
+      method: 'POST',
+      headers: {
+        // Don't set Content-Type for FormData - browser will set it with boundary
+      },
+      body: formData
+    });
+
+    return response.data;
+  }
+
+  /**
+   * Get enhanced conversation history with GRC insights
+   */
+  async getEnhancedConversationHistory(userId: string, limit: number = 50): Promise<{
+    conversations: Array<{
+      id: string;
+      input: any;
+      output: any;
+      timestamp: string;
+      reasoning: string;
+      toolsUsed: string[];
+      grcAnalysis: any;
+    }>;
+    insights: {
+      totalInteractions: number;
+      timeRange: any;
+      grcAnalysis: any;
+      toolUsage: any;
+      topTopics: string[];
+      complianceFrameworks: string[];
+    };
+    summary: {
+      totalInteractions: number;
+      timeRange: any;
+    };
+  }> {
+    const params = new URLSearchParams();
+    if (limit) params.set('limit', String(limit));
+
+    const endpoint = `/enhanced/conversations/${userId}${params.toString() ? '?' + params.toString() : ''}`;
+    const response = await this.makeRequest<{ success: boolean; data: any }>(endpoint);
+    return response.data;
+  }
+
+  /**
+   * Search enhanced conversation memory
+   */
+  async searchEnhancedMemory(query: string, limit: number = 10): Promise<{
+    query: string;
+    results: Array<{
+      interaction: any;
+      relevanceScore: number;
+      matchedTerms: string[];
+    }>;
+    summary: {
+      totalResults: number;
+      searchTerms: string[];
+    };
+  }> {
+    const params = new URLSearchParams();
+    params.set('query', query);
+    if (limit) params.set('limit', String(limit));
+
+    const endpoint = `/enhanced/memory/search?${params.toString()}`;
+    const response = await this.makeRequest<{ success: boolean; data: any }>(endpoint);
+    return response.data;
+  }
+
+  /**
+   * Get enhanced MCP tools and servers
+   */
+  async getEnhancedMcpTools(): Promise<{
+    tools: Array<{
+      server: string;
+      name: string;
+      description: string;
+      inputSchema: any;
+    }>;
+    servers: Array<{
+      id: string;
+      name: string;
+      status: string;
+      toolCount: number;
+      auth?: string;
+      url?: string;
+    }>;
+    summary: {
+      totalTools: number;
+      totalServers: number;
+      toolsByServer: Record<string, number>;
+    };
+  }> {
+    const response = await this.makeRequest<{ success: boolean; data: any }>('/enhanced/tools');
+    return response.data;
+  }
+
+  /**
+   * Get enhanced chat system health
+   */
+  async getEnhancedChatHealth(): Promise<{
+    service: string;
+    status: string;
+    mcpServers: {
+      total: number;
+      active: number;
+      inactive: number;
+    };
+    capabilities: string[];
+    version: string;
+  }> {
+    const response = await this.makeRequest<{ success: boolean; data: any }>('/enhanced/health');
+    return response.data;
+  }
+
+  // =====================================================
+  // LEGACY CHAT & SESSION MANAGEMENT
   // =====================================================
 
   /**

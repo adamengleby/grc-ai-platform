@@ -13,6 +13,7 @@ import {
   Link,
   Settings as SettingsIcon,
   BarChart3,
+  MessageSquare,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -56,6 +57,13 @@ export const DashboardSidebar: React.FC = () => {
           icon: <Bot className="h-5 w-5" />,
           label: 'AI Agents',
           roles: ['TenantOwner', 'AgentUser'],
+        },
+        {
+          href: '/enhanced-chat',
+          icon: <MessageSquare className="h-5 w-5" />,
+          label: 'Enhanced Chat',
+          roles: ['TenantOwner', 'AgentUser'],
+          badge: 'New',
         },
         {
           href: '/analytics',
