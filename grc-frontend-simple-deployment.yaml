@@ -59,7 +59,7 @@ properties:
         echo "🔧 Building React application v2.0.0..."
         echo "API Base URL: $VITE_API_BASE_URL"
 
-        # Build with updated API URL for new backend name
+        # Build with updated API URL for working backend
         VITE_API_BASE_URL="https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1" npm run build
 
         echo "✅ Build completed."
