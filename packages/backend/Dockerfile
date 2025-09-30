@@ -35,11 +35,11 @@ RUN mkdir -p /app/data && chmod 755 /app/data
 RUN chown -R node:node /app
 USER node
 
-EXPOSE 3005
+EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3005/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }).on('error', () => { process.exit(1); });"
+  CMD node -e "require('http').get('http://localhost:8080/api/v1/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }).on('error', () => { process.exit(1); });"
 
 # Production command
 CMD ["node", "dist/index.js"]

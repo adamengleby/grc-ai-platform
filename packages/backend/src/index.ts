@@ -555,7 +555,7 @@ app.get('/api/v1/insights/health', (req, res) => {
 });
 
 // Enhanced chat router
-app.use('/api/v1/enhanced', enhancedChatRouter);
+app.use('/api/v1/enhanced-chat', enhancedChatRouter);
 
 // Generic catch-all for API endpoints
 app.all('/api/v1/*', (req, res) => {

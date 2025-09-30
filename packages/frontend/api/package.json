@@ -1,7 +1,0 @@
-{
-  "name": "grc-platform-api",
-  "version": "1.0.0",
-  "description": "API functions for GRC platform",
-  "main": "index.js",
-  "dependencies": {}
-}
