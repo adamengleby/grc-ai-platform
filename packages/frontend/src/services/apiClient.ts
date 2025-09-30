@@ -10,7 +10,7 @@ import { User, Tenant, UserRole } from '@/types/tenant';
 // API Configuration
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV
   ? 'http://localhost:8080/api/v1'
-  : 'https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1');
+  : 'https://grc-backend.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1');
 
 // Request types
 interface ApiRequestOptions {
