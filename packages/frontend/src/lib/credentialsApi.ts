@@ -324,7 +324,7 @@ class CredentialsManager {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'x-tenant-id': this.tenantId || 'A1B2C3D4-E5F6-7G8H-9I0J-K1L2M3N4O5P6'
+          'x-tenant-id': this.tenantId || '123e4567-e89b-12d3-a456-426614174000'
         },
         body: JSON.stringify({
           baseUrl: credentials.baseUrl,
