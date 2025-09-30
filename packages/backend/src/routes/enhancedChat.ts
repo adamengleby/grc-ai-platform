@@ -45,7 +45,7 @@ router.post('/process', async (req: Request, res: Response) => {
 
     // Initialize MCP Server Manager
     const mcpManager = new MCPServerManager();
-    await mcpManager.initialize();
+    await mcpManager.initializeAllServers();
 
     // Get available tools for this tenant/user
     const availableTools = await mcpManager.getAvailableTools();
@@ -111,7 +111,7 @@ router.get('/health', async (req: Request, res: Response) => {
   try {
     // Initialize components to check health
     const mcpManager = new MCPServerManager();
-    await mcpManager.initialize();
+    await mcpManager.initializeAllServers();
 
     const availableTools = await mcpManager.getAvailableTools();
 
@@ -161,7 +161,7 @@ router.get('/capabilities', async (req: Request, res: Response) => {
 
     // Initialize components
     const mcpManager = new MCPServerManager();
-    await mcpManager.initialize();
+    await mcpManager.initializeAllServers();
 
     const availableTools = await mcpManager.getAvailableTools();
 
@@ -182,8 +182,8 @@ router.get('/capabilities', async (req: Request, res: Response) => {
           description: tool.description || 'No description available'
         })),
         llmProviders: activeLLMProviders,
-        llmConfigurations: availableConfigs.filter(config => config.isEnabled).map(config => ({
-          id: config.id,
+        llmConfigurations: availableConfigs.filter(config => config.is_enabled).map(config => ({
+          id: config.config_id,
           name: config.name,
           provider: config.provider,
           model: config.model

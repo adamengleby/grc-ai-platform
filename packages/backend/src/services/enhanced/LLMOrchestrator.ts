@@ -59,11 +59,12 @@ export class LLMOrchestrator {
   async loadLLMConfigurations(): Promise<void> {
     try {
       if (this.tenantId) {
-        this.availableConfigs = await this.llmConfigService.getLLMConfigsByTenant(this.tenantId);
+        this.availableConfigs = await this.llmConfigService.getTenantLLMConfigs(this.tenantId);
         console.log(`📋 Loaded ${this.availableConfigs.length} LLM configurations for tenant ${this.tenantId}`);
       } else {
-        this.availableConfigs = await this.llmConfigService.getAllLLMConfigs();
-        console.log(`📋 Loaded ${this.availableConfigs.length} LLM configurations`);
+        // For no tenant specified, use a default tenant or handle differently
+        this.availableConfigs = [];
+        console.log(`📋 No tenant specified, using empty configuration`);
       }
     } catch (error) {
       console.error('Failed to load LLM configurations:', error);
@@ -78,10 +79,10 @@ export class LLMOrchestrator {
 
       // Initialize OpenAI clients from configurations
       for (const config of this.availableConfigs) {
-        if (config.provider === 'openai' && config.apiKey && config.isEnabled) {
+        if (config.provider === 'openai' && config.api_key_vault_secret && config.is_enabled) {
           this.openaiClient = new OpenAI({
-            apiKey: config.apiKey,
-            baseURL: config.endpoint || undefined
+            apiKey: config.api_key_vault_secret, // In production this would be resolved from Key Vault
+            baseURL: config.endpoint_vault_secret || undefined
           });
           console.log(`🤖 Initialized OpenAI client: ${config.name}`);
           break; // Use first available OpenAI config
@@ -90,10 +91,10 @@ export class LLMOrchestrator {
 
       // Initialize Anthropic clients from configurations
       for (const config of this.availableConfigs) {
-        if (config.provider === 'anthropic' && config.apiKey && config.isEnabled) {
+        if (config.provider === 'anthropic' && config.api_key_vault_secret && config.is_enabled) {
           this.anthropicClient = new Anthropic({
-            apiKey: config.apiKey,
-            baseURL: config.endpoint || undefined
+            apiKey: config.api_key_vault_secret, // In production this would be resolved from Key Vault
+            baseURL: config.endpoint_vault_secret || undefined
           });
           console.log(`🤖 Initialized Anthropic client: ${config.name}`);
           break; // Use first available Anthropic config
@@ -280,7 +281,7 @@ export class LLMOrchestrator {
 
     // Find the OpenAI configuration being used
     const openaiConfig = this.availableConfigs.find(config =>
-      config.provider === 'openai' && config.isEnabled
+      config.provider === 'openai' && config.is_enabled
     );
 
     if (!openaiConfig) {
@@ -307,7 +308,7 @@ Provide clear, actionable GRC guidance. Include specific recommendations and nex
         { role: 'user', content: context.message }
       ],
       temperature: openaiConfig.temperature || 0.7,
-      max_tokens: openaiConfig.maxTokens || 2000
+      max_tokens: openaiConfig.max_tokens || 2000
     });
 
     return {
@@ -321,7 +322,7 @@ Provide clear, actionable GRC guidance. Include specific recommendations and nex
 
     // Find the Anthropic configuration being used
     const anthropicConfig = this.availableConfigs.find(config =>
-      config.provider === 'anthropic' && config.isEnabled
+      config.provider === 'anthropic' && config.is_enabled
     );
 
     if (!anthropicConfig) {
@@ -337,7 +338,7 @@ Provide expert GRC guidance with specific, actionable recommendations.`;
 
     const completion = await this.anthropicClient.messages.create({
       model: anthropicConfig.model || 'claude-3-sonnet-20240229',
-      max_tokens: anthropicConfig.maxTokens || 2000,
+      max_tokens: anthropicConfig.max_tokens || 2000,
       temperature: anthropicConfig.temperature || 0.7,
       system: systemPrompt,
       messages: [
@@ -451,11 +452,11 @@ Provide expert GRC guidance with specific, actionable recommendations.`;
   getActiveLLMProviders(): string[] {
     const providers: string[] = [];
     if (this.openaiClient) {
-      const config = this.availableConfigs.find(c => c.provider === 'openai' && c.isEnabled);
+      const config = this.availableConfigs.find(c => c.provider === 'openai' && c.is_enabled);
       providers.push(`OpenAI (${config?.name || 'Unknown'})`);
     }
     if (this.anthropicClient) {
-      const config = this.availableConfigs.find(c => c.provider === 'anthropic' && c.isEnabled);
+      const config = this.availableConfigs.find(c => c.provider === 'anthropic' && c.is_enabled);
       providers.push(`Anthropic (${config?.name || 'Unknown'})`);
     }
     return providers;
