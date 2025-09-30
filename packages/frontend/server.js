@@ -1,42 +1,29 @@
 const express = require('express');
 const path = require('path');
 const app = express();
+const PORT = process.env.PORT || 8080;
 
-// Serve static files from dist directory with proper headers
-app.use(express.static(path.join(__dirname, 'dist'), {
-  setHeaders: (res, filepath) => {
-    // Set proper MIME types for assets
-    if (filepath.endsWith('.js')) {
-      res.setHeader('Content-Type', 'application/javascript');
-    }
-    if (filepath.endsWith('.css')) {
-      res.setHeader('Content-Type', 'text/css');
-    }
-    // Enable caching for assets
-    if (filepath.includes('/assets/')) {
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-    }
-  }
-}));
+// Serve static files from dist directory
+app.use(express.static(path.join(__dirname, 'dist')));
 
-// Health check endpoint
+// Health endpoint
 app.get('/health', (req, res) => {
   res.json({
-    status: 'healthy',
-    service: 'React Frontend',
-    timestamp: new Date().toISOString(),
-    environment: 'Azure Container Apps'
+    status: 'ok',
+    service: 'grc-frontend',
+    version: '1.3.0',
+    timestamp: new Date().toISOString()
   });
 });
 
-// Handle React Router - send all non-asset routes to index.html
+// SPA routing - serve index.html for all routes
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-const port = process.env.PORT || 8080;
-app.listen(port, () => {
-  console.log(`🚀 GRC AI Platform Frontend running on port ${port}`);
-  console.log(`📍 Serving React app from: ${path.join(__dirname, 'dist')}`);
-  console.log(`🔗 Backend API: https://grc-backend-simple.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io/api/v1`);
+console.log('🎉 GRC Frontend v1.3.0 starting on port', PORT);
+app.listen(PORT, () => {
+  console.log('✅ Frontend server running on port', PORT);
+  console.log('🌐 Serving React app with clean URLs');
+  console.log('📁 Static files from:', path.join(__dirname, 'dist'));
 });
