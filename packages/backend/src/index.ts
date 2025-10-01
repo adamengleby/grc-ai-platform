@@ -14,6 +14,7 @@ const port = process.env.PORT || 8080;
 app.use(cors({
   origin: [
     'https://grc-ai-platform-prod.azurestaticapps.net',
+    'https://grc-frontend.calmmeadow-5080198e.australiasoutheast.azurecontainerapps.io',
     'http://localhost:5173',
     'http://localhost:3000'
   ],
@@ -40,98 +41,90 @@ app.get('/api/v1/health', (req, res) => {
   });
 });
 
-// Simple LLM Configurations - supports tenant isolation
+// Simple LLM configs endpoint with in-memory persistence
+const llmConfigs = new Map();
+
+// Add some default LLM configurations
+const defaultConfigs = [
+  {
+    id: 'llm-openai-gpt4',
+    tenantId: 'default',
+    name: 'OpenAI GPT-4',
+    provider: 'openai',
+    model: 'gpt-4',
+    endpoint: 'https://api.openai.com/v1',
+    temperature: 0.7,
+    maxTokens: 2000,
+    apiKey: '***',
+    isEnabled: true,
+    createdAt: new Date().toISOString(),
+    status: 'active'
+  },
+  {
+    id: 'llm-anthropic-claude',
+    tenantId: 'default',
+    name: 'Claude 3.5 Sonnet',
+    provider: 'anthropic',
+    model: 'claude-3-5-sonnet-20241022',
+    endpoint: 'https://api.anthropic.com',
+    temperature: 0.7,
+    maxTokens: 4000,
+    apiKey: '***',
+    isEnabled: true,
+    createdAt: new Date().toISOString(),
+    status: 'active'
+  }
+];
+
+// Initialize with default configs
+defaultConfigs.forEach(config => llmConfigs.set(config.id, config));
+
 app.get('/api/v1/simple-llm-configs', (req, res) => {
   const tenantId = req.headers['x-tenant-id'] as string || 'default';
-  console.log(`🤖 [LLM Configs] Getting LLM configs for tenant: ${tenantId}`);
+  console.log(`🔍 [LLM Configs] Getting configs for tenant: ${tenantId}`);
 
-  let llmConfigs = [];
-
-  if (tenantId === 'a1b2c3d4-e5f6-4a8b-9c0d-1e2f3a4b5c6d') {
-    // Sarah Chen's ACME tenant - 2 ACME LLM configs
-    llmConfigs = [
-      {
-        config_id: 'a1234567-89ab-4cde-f012-3456789abcd0',
-        name: 'ACME Azure OpenAI GPT-4',
-        provider: 'azure',
-        model: 'gpt-4',
-        endpoint: 'https://acme-openai.openai.azure.com',
-        api_key: '[CONFIGURED]',
-        temperature: 0.7,
-        max_tokens: 4000,
-        response_format: 'text',
-        is_enabled: 1,
-        is_default: true
-      },
-      {
-        config_id: 'a1234567-89ab-4cde-f012-3456789abcd1',
-        name: 'ACME Claude Enterprise',
-        provider: 'anthropic',
-        model: 'claude-3-sonnet',
-        endpoint: 'https://api.anthropic.com/v1',
-        api_key: '[CONFIGURED]',
-        temperature: 0.4,
-        max_tokens: 4000,
-        response_format: 'text',
-        is_enabled: 1,
-        is_default: false
-      }
-    ];
-  } else if (tenantId === 'f1234567-89ab-4cde-f012-3456789abcde') {
-    // David Smith's FinTech tenant - 2 FinTech LLM configs
-    llmConfigs = [
-      {
-        config_id: 'f1234567-89ab-4cde-f012-3456789abcd2',
-        name: 'FinTech Azure OpenAI GPT-3.5',
-        provider: 'azure',
-        model: 'gpt-3.5-turbo',
-        endpoint: 'https://fintech-openai.openai.azure.com',
-        api_key: '[CONFIGURED]',
-        temperature: 0.3,
-        max_tokens: 3000,
-        response_format: 'text',
-        is_enabled: 1,
-        is_default: true
-      },
-      {
-        config_id: 'f1234567-89ab-4cde-f012-3456789abcd3',
-        name: 'FinTech Claude Pro',
-        provider: 'anthropic',
-        model: 'claude-3-sonnet',
-        endpoint: 'https://api.anthropic.com/v1',
-        api_key: '[CONFIGURED]',
-        temperature: 0.4,
-        max_tokens: 4000,
-        response_format: 'text',
-        is_enabled: 1,
-        is_default: false
-      }
-    ];
-  }
+  // Get configs for this tenant
+  const tenantConfigs = Array.from(llmConfigs.values()).filter(config => config.tenantId === tenantId);
 
   res.json({
     success: true,
     data: {
-      llm_configs: llmConfigs,
-      total: llmConfigs.length,
+      llm_configs: tenantConfigs,
+      total: tenantConfigs.length,
       tenant_id: tenantId,
-      database_type: 'Mock Data (tenant-isolated)'
+      database_type: 'In-Memory (tenant-isolated)'
     },
-    message: `${llmConfigs.length} LLM configurations retrieved successfully for tenant`,
+    message: `${tenantConfigs.length} LLM configurations retrieved successfully for tenant`,
     timestamp: new Date().toISOString()
   });
 });
 
-// POST endpoint for LLM configs
 app.post('/api/v1/simple-llm-configs', (req, res) => {
-  res.status(201).json({
+  const tenantId = req.headers['x-tenant-id'] as string || 'default';
+  const { name, provider, model, endpoint, temperature, maxTokens, apiKey } = req.body;
+
+  const config = {
+    id: `config-${Date.now()}`,
+    tenantId,
+    name,
+    provider,
+    model,
+    endpoint,
+    temperature: temperature || 0.7,
+    maxTokens: maxTokens || 2000,
+    apiKey,
+    isEnabled: true,
+    createdAt: new Date().toISOString(),
+    status: 'active'
+  };
+
+  llmConfigs.set(config.id, config);
+
+  console.log(`✅ [LLM Config] Created config ${config.id} for tenant ${tenantId}`);
+
+  res.json({
     success: true,
-    data: {
-      id: 'new-config-' + Date.now(),
-      ...req.body,
-      createdAt: new Date().toISOString(),
-      status: 'active'
-    },
+    data: config,
     message: 'LLM configuration created successfully'
   });
 });
